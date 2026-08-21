@@ -14,7 +14,7 @@ export default function App(){
   const [deferredPrompt, setDeferredPrompt] = useState(null)
   const [showInstallHelp, setShowInstallHelp] = useState(false)
   const [platform, setPlatform] = useState('android')
-  const [have, setHave] = useState("Two sad tomatoes, mushrooms starting to turn, cream that's been open a few days, potatoes, and some leftover chicken.")
+  const [have, setHave] = useState("") // EMPTY - example is placeholder only
   const [effort, setEffort] = useState(0)
   const [listening, setListening] = useState(false)
   const [thinking, setThinking] = useState(false)
@@ -22,7 +22,9 @@ export default function App(){
   const [result, setResult] = useState(null)
   const [cookStep, setCookStep] = useState(0)
   const [cookMode, setCookMode] = useState(false)
+
   const recRef = useRef(null)
+  const isListeningRef = useRef(false)
 
   useEffect(()=>{
     if(/iPhone|iPad|iPod/.test(navigator.userAgent)) setPlatform('ios')
@@ -49,25 +51,65 @@ export default function App(){
     window.speechSynthesis.speak(u)
   }
 
+  // STANDBY LISTENING - doesn't cut off on breath
   const startVoice = async ()=>{
     try{ await navigator.mediaDevices.getUserMedia({audio:true}) }catch(e){ alert('Mic blocked — Chrome → lock → Allow microphone'); return }
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition
     if(!SR){ alert('Use CHROME for voice'); return }
-    if(listening){ recRef.current?.stop(); setListening(false); return }
-    const rec = new SR(); rec.lang='en-US'; rec.interimResults=true; rec.continuous=false
-    rec.onstart=()=>{ setListening(true); setHave('Listening...') }
-    rec.onresult=(e)=>{ let t=''; for(let i=0;i<e.results.length;i++) t+=e.results[i][0].transcript+' '; setHave(t.trim()) }
-    rec.onend=()=>setListening(false)
-    recRef.current=rec; rec.start()
+
+    if(isListeningRef.current){
+      isListeningRef.current = false
+      recRef.current?.stop()
+      setListening(false)
+      return
+    }
+
+    const rec = new SR()
+    rec.lang='en-US'
+    rec.interimResults=true
+    rec.continuous=true // STANDBY
+    rec.maxAlternatives=1
+    let finalText = have
+
+    rec.onstart=()=>{
+      isListeningRef.current = true
+      setListening(true)
+      if(!finalText) setHave('Listening... keep talking, tap mic again to stop')
+    }
+    rec.onresult=(e)=>{
+      let interim = ''
+      let finalChunk = ''
+      for(let i=e.resultIndex; i<e.results.length; i++){
+        const t = e.results[i][0].transcript
+        if(e.results[i].isFinal) finalChunk += t + ' '
+        else interim += t
+      }
+      if(finalChunk) finalText = (finalText + ' ' + finalChunk).trim()
+      const display = (finalText + ' ' + interim).replace('Listening... keep talking, tap mic again to stop','').trim()
+      if(display) setHave(display)
+      else if(interim) setHave(interim)
+    }
+    rec.onerror=(e)=>{
+      if(e.error==='no-speech') return
+      isListeningRef.current=false
+      setListening(false)
+    }
+    rec.onend=()=>{
+      if(isListeningRef.current){
+        try{ rec.start() }catch{}
+      }else{
+        setListening(false)
+        setHave(prev=> prev.replace('Listening... keep talking, tap mic again to stop','').trim())
+      }
+    }
+    recRef.current=rec
+    try{ rec.start() }catch{}
   }
 
-  // REAL LOGIC - USES ONLY WHAT YOU TYPED, NO HALLUCINATED SPINACH
   const sortDinner = async ()=>{
     window.speechSynthesis.cancel()
     if(!have.trim()){ alert('Tell me what you got first'); return }
     setThinking(true)
-
-    // Try real backend if you have it deployed (set VITE_API_URL in Vercel env)
     const API = import.meta.env.VITE_API_URL
     if(API){
       try{
@@ -75,82 +117,35 @@ export default function App(){
         const data = await r.json()
         if(data.recipes && data.recipes[0]){
           const first = data.recipes[0]
-          const real = {
-            title: first.title,
-            meta: `${first.time || '20 min'} · using ${have.split(',').slice(0,2).join(' + ')}`,
-            speak: data.spoken_response || `We're making ${first.title}. ${first.time || ''}`,
-            steps: first.steps,
-            used: first.ingredients_used || have
-          }
+          const real = { title: first.title, meta: `${first.time || '20 min'} · using ${have.split(',').slice(0,2).join(' + ')}`, speak: data.spoken_response || `We're making ${first.title}`, steps: first.steps, used: have }
           setResult(real); setThinking(false); speak(real.speak); return
         }
-      }catch(e){ console.log('backend fail, falling back to local', e) }
+      }catch(e){}
     }
-
-    // LOCAL FALLBACK THAT RESPECTS INGREDIENTS - NO LIES
     setTimeout(()=>{
       const raw = have.toLowerCase()
       const has = (w)=> raw.includes(w)
       const ingredients = have.split(',').map(s=>s.trim()).filter(Boolean)
       const main = ingredients[0] || 'what you got'
       const second = ingredients[1] || ''
-
       let title, meta, steps, speakText
-
       if(has('pasta') || has('noodle')){
-        if(has('garlic') && (has('spinach') || has('greens'))){
-          title = `Creamy garlic ${has('spinach')?'spinach':''} pasta`.replace('  ',' ').trim()
-        } else if(has('egg')){
-          title = has('butter') ? 'Garlic butter pasta with egg' : 'Pasta with egg'
-        } else {
-          title = `${main} garlic pasta`
-        }
+        title = has('garlic') ? `${main} garlic pasta` : `${main} pasta`
         meta = `${effort===0?'20 min':'28 min'} · one pan · using ${ingredients.slice(0,2).join(' + ')}`
-        steps = [
-          `Boil water, salt it hard. Cook ${has('pasta')?'pasta':'noodles'} — 9 min.`,
-          `Low heat, melt ${has('butter')?'butter':'oil'}, add ${has('garlic')?'garlic, sliced':''} ${has('onion')?'and onion':''} — don't burn.`,
-          `Scoop 2 ladles starchy water into pan — that's your sauce from what you've got.`,
-          `Drain, toss everything: ${have}. ${has('spinach') || has('greens') ? 'Wilt greens last 60 seconds.' : 'Toss until glossy.'}`,
-          `Taste. Pepper, maybe lemon if you have. Done.`
-        ]
-      } else if(has('egg')){
-        title = second ? `${main} + ${second} eggs` : `Eggs with ${main}`
-        meta = `${effort===0?'12 min':'22 min'} · one pan · using only what you typed`
-        steps = [
-          `Heat pan, ${has('butter')?'butter':'oil'} medium.`,
-          `Add ${ingredients.filter(i=>!i.toLowerCase().includes('egg')).join(', ')} — soften 3-4 min.`,
-          `Crack ${has('egg')?'eggs':'eggs if you have'} on top, lid on 4 min.`,
-          `Season. Eat straight from pan.`
-        ]
-      } else if(has('chicken') || has('beef') || has('bangers') || has('sausage')){
-        const protein = has('bangers')?'bangers':has('chicken')?'chicken':has('beef')?'beef':'protein'
-        title = `${protein} + ${second || 'what you have'} pan`
-        meta = `${effort===0?'18 min':'30 min'} · using ${have}`
-        steps = [
-          `Hot pan, oil, ${protein} in — brown hard 5 min.`,
-          `Add ${ingredients.filter(i=>!i.toLowerCase().includes(protein)).join(', ') || 'everything else'} — toss.`,
-          `Splash water, lid 3 min to steam through.`,
-          `Season. Done.`
-        ]
-      } else {
+        steps = [`Boil water, salt hard. Cook ${main} — 9 min.`, `Low heat, melt ${has('butter')?'butter':'oil'}, add ${has('garlic')?'garlic':''} — don't burn.`, `2 ladles starchy water into pan — sauce from what you got.`, `Toss: ${have}.`, `Pepper. Done.`]
+      }else if(has('egg')){
+        title = `${main} + eggs`
+        meta = `${effort===0?'12 min':'22 min'} · one pan · using ONLY what you typed`
+        steps = [`Heat pan, ${has('butter')?'butter':'oil'} medium.`, `Add ${ingredients.filter(i=>!i.toLowerCase().includes('egg')).join(', ') || 'veg'} — 3 min.`, `Crack eggs on top, lid 4 min.`, `Season. Eat from pan.`]
+      }else{
         title = `${main} ${second?'+ '+second:''} — sorted`
         meta = `Using ONLY: ${have} · ${effort===0?'bare minimum':effort===1?'normal':'feel like cooking'}`
-        steps = [
-          `You have: ${have}.`,
-          `Heat ${has('butter')?'butter':'oil'} in pan, add hardest veg first.`,
-          `Add rest in order of time it needs.`,
-          `Season as you go. Water is your friend for sauce.`,
-          `Taste and stop. That's dinner handled.`
-        ]
+        steps = [`You have: ${have}.`, `Heat ${has('butter')?'butter':'oil'}, hardest veg first.`, `Add rest in order.`, `Splash water for sauce.`, `Done.`]
       }
-
-      speakText = `We're making ${title}. ${meta}. Using only what you said — ${have}. Want to cook it?`
-
-      setResult({title, meta, steps, speak: speakText, used: have})
-      setThinking(false)
-      setCookStep(0)
+      speakText = `We're making ${title}. ${meta}. Using only what you said. Want to cook it?`
+      setResult({title, meta, steps, speak: speakText, used: have}); setThinking(false); setCookStep(0)
       setTimeout(()=>speak(speakText), 200)
-    }, 700)
+    }, 600)
   }
 
   const gestureState = listening? 'listening' : thinking? 'thinking' : speaking? 'speaking' : result? 'done' : 'idle'
@@ -171,7 +166,7 @@ export default function App(){
             <div className="fixed inset-0 bg-black/40 backdrop-blur flex items-end p-4 z-50">
               <div className="w-full bg-white rounded-[28px] p-6 max-w-[400px] mx-auto">
                 <h3 className="font-bold">Install Akchally</h3>
-                <p className="mt-3 text-[14px]">{platform==='ios'?'Tap Share → Add to Home Screen':'Tap Add to Home Screen when prompted.'}</p>
+                <p className="mt-3 text-[14px]">Tap Add to Home Screen when prompted.</p>
                 <button onClick={()=>{setShowInstallHelp(false); setIsAppView(true)}} className="mt-5 w-full h-12 rounded-full bg-black text-white font-bold">Got it</button>
               </div>
             </div>
@@ -194,12 +189,12 @@ export default function App(){
             <h1 className="text-[32px] font-bold leading-[0.95] tracking-tight">What are we<br/>making?</h1>
             <p className="mt-3 text-[15px] leading-[1.4] text-[#7D846E]">Tell me what you've got.<br/>I'll sort the rest.</p>
             <div className="mt-8 relative">
-              <textarea value={have} onChange={e=>setHave(e.target.value)} placeholder="Two sad tomatoes, mushrooms starting to turn, cream that's been open a few days, potatoes, and some leftover chicken." className={`w-full min-h-[112px] p-5 pr-12 rounded-[20px] bg-[#EDE8DF] border text-[16px] leading-[1.4] outline-none transition-all ${listening?'border-[#C56A4A] bg-white shadow-[0_0_0_3px_rgba(197,106,74,0.15)]':'border-black/[0.06]'}`} />
-              <button onClick={startVoice} className={`absolute bottom-3 right-3 w-10 h-10 rounded-full flex items-center justify-center transition-all ${listening?'bg-[#C56A4A] text-white animate-pulse scale-110':'bg-white border border-black/10'}`}>{listening?'●':'🎙'}</button>
+              <textarea value={have} onChange={e=>setHave(e.target.value)} placeholder="eggs, butter, garlic, pasta, spinach that's about to die" className={`w-full min-h-[112px] p-5 pr-12 rounded-[20px] bg-[#EDE8DF] border text-[16px] leading-[1.4] outline-none transition-all ${listening?'border-[#C56A4A] bg-white shadow-[0_0_0_3px_rgba(197,106,74,0.15)]':'border-black/[0.06]'}`} />
+              <button onClick={startVoice} className={`absolute bottom-3 right-3 w-10 h-10 rounded-full flex items-center justify-center transition-all ${listening?'bg-[#C56A4A] text-white animate-pulse scale-110':'bg-white border border-black/10'}`}>{listening?'■':'🎙'}</button>
             </div>
             <div className={`mt-3 flex items-center gap-2 text-[12px] font-medium ${listening?'text-[#C56A4A]':'text-[#7D846E]'}`}>
-              <span className={`w-5 h-5 rounded-full border flex items-center justify-center ${listening?'bg-[#C56A4A] text-white animate-pulse':''}`}>{listening?'●':'🎙'}</span>
-              {listening?'Listening... speak now':'or just tell me — tap mic'}
+              <span className={`w-5 h-5 rounded-full border flex items-center justify-center ${listening?'bg-[#C56A4A] text-white animate-pulse':''}`}>{listening?'■':'🎙'}</span>
+              {listening?'Standby listening — breath, think, keep talking. Tap ■ to stop':'or just tell me — tap mic, keep talking'}
             </div>
             <div className="mt-10">
               <p className="text-[11px] tracking-[0.14em] font-bold opacity-40">HOW MUCH EFFORT?</p>
@@ -217,10 +212,6 @@ export default function App(){
             <button onClick={sortDinner} className="mt-10 w-full h-[56px] rounded-full bg-[#1A1A1A] text-white font-bold text-[15px] flex items-center justify-center gap-2">
               {thinking? <><DoneGesture state="thinking"/><span className="ml-2">Sorting...</span></> : <>Sort dinner out →</>}
             </button>
-            <div className="mt-10 flex flex-col items-center gap-3">
-              <button className="flex items-center gap-2 text-[12px] text-black/50"><DoneGesture state="idle"/> Take a fridge photo</button>
-              <p className="text-[11px] opacity-30">Last time · {have.slice(0,30)} →</p>
-            </div>
           </main>
         ) : !cookMode && result ? (
           <main className="px-6 pt-12 pb-10">
