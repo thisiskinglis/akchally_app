@@ -11,17 +11,25 @@ function DoneGesture({ state }){
 
 export default function App(){
   const [isAppView, setIsAppView] = useState(false)
-  const [step, setStep] = useState('inventory') // inventory -> mode -> thinking -> result -> cook
+  const [step, setStep] = useState('inventory')
   const [have, setHave] = useState("")
-  const [mode, setMode] = useState(null) // quick | relaxed
+  const [mode, setMode] = useState(null)
   const [listening, setListening] = useState(false)
   const [thinking, setThinking] = useState(false)
   const [speaking, setSpeaking] = useState(false)
-  const [v1, setV1] = useState(null) // full V1 response
+  const [v1, setV1] = useState(null)
   const [cookStep, setCookStep] = useState(0)
+  const [cookSession, setCookSession] = useState(null)
+  const [helpOpen, setHelpOpen] = useState(false)
+  const [helpQ, setHelpQ] = useState("")
+  const [helpListening, setHelpListening] = useState(false)
+  const [helpThinking, setHelpThinking] = useState(false)
+  const [helpAnswer, setHelpAnswer] = useState(null)
+
   const recRef = useRef(null)
   const isListeningRef = useRef(false)
-  const [thinkingStage, setThinkingStage] = useState(0)
+  const helpRecRef = useRef(null)
+  const helpIsListeningRef = useRef(false)
 
   useEffect(()=>{
     const standalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone
@@ -39,7 +47,7 @@ export default function App(){
   }
 
   const startVoice = async ()=>{
-    try{ await navigator.mediaDevices.getUserMedia({audio:true}) }catch{ alert('Mic blocked — Chrome → lock → Allow'); return }
+    try{ await navigator.mediaDevices.getUserMedia({audio:true}) }catch{ alert('Mic blocked'); return }
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition
     if(!SR){ alert('Use CHROME'); return }
     if(isListeningRef.current){ isListeningRef.current=false; recRef.current?.stop(); setListening(false); return }
@@ -57,6 +65,25 @@ export default function App(){
     recRef.current=rec; try{rec.start()}catch{}
   }
 
+  const startHelpVoice = async ()=>{
+    try{ await navigator.mediaDevices.getUserMedia({audio:true}) }catch{ alert('Mic blocked'); return }
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition
+    if(!SR) return
+    if(helpIsListeningRef.current){ helpIsListeningRef.current=false; helpRecRef.current?.stop(); setHelpListening(false); return }
+    const rec = new SR(); rec.lang='en-US'; rec.interimResults=true; rec.continuous=true
+    let finalText = helpQ
+    rec.onstart=()=>{ helpIsListeningRef.current=true; setHelpListening(true) }
+    rec.onresult=(e)=>{
+      let interim='', finalChunk=''
+      for(let i=e.resultIndex;i<e.results.length;i++){ const t=e.results[i][0].transcript; if(e.results[i].isFinal) finalChunk+=t+' '; else interim+=t }
+      if(finalChunk) finalText=(finalText+' '+finalChunk).trim()
+      const display=(finalText+' '+interim).trim()
+      if(display) setHelpQ(display)
+    }
+    rec.onend=()=>{ if(helpIsListeningRef.current){ try{rec.start()}catch{}}else setHelpListening(false) }
+    helpRecRef.current=rec; try{rec.start()}catch{}
+  }
+
   const goToMode = ()=>{
     if(!have.trim()){ alert('Tell me what you got first'); return }
     setStep('mode')
@@ -66,75 +93,109 @@ export default function App(){
     setMode(selectedMode)
     setStep('thinking')
     setThinking(true)
-    setThinkingStage(0)
-    // Animate through stages
-    const stages = ['Interpreting pantry...', 'Finding dish families...', 'Building 3-4 candidates...', 'Scoring for deliciousness...', 'Selecting best combo...', 'Culinary balance check...']
-    let idx=0
-    const interval = setInterval(()=>{ idx++; if(idx<stages.length) setThinkingStage(idx); else clearInterval(interval) }, 600)
-
     const API = import.meta.env.VITE_API_URL
     try{
       let data
       if(API){
-        const r = await fetch(`${API}/api/think`,{
-          method:'POST',
-          headers:{'Content-Type':'application/json'},
-          body: JSON.stringify({transcript: have, mode: selectedMode})
-        })
+        const r = await fetch(`${API}/api/think`,{method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({transcript: have, mode: selectedMode})})
         data = await r.json()
       }else{
-        // Local fallback calls same logic as backend would
-        await new Promise(res=>setTimeout(res, 2200))
-        // Simulate V1 structure locally (very simplified)
-        const lower = have.toLowerCase()
-        const has = (k)=> lower.includes(k)
-        const protein = has('chicken')?'leftover chicken': has('ham')?'ham': has('egg')?'eggs':'chicken'
-        const carb = has('potato')?'potatoes': has('pizza')?'pizza': has('pasta')?'pasta':'potatoes'
+        await new Promise(res=>setTimeout(res, 1800))
         data = {
-          kitchen_state: {ingredients: have.split(',').map(s=>({name:s.trim()}))},
-          mode_interpretation: selectedMode==='quick'?{mode:'quick', target_total_time_minutes:25, complexity:'low'}:{mode:'relaxed', target_total_time_minutes:60, complexity:'moderate', allow_roasting:true},
-          candidates: [
-            {dish:`crispy ${protein} & ${carb} skillet`, family: carb.includes('pizza')?'toastie':'hash / skillet', ingredients:[protein, carb, 'mushrooms','garlic','cheese'], why:'best coherence'},
-            {dish:'mushroom ham cheese frittata', family:'frittata', ingredients:['mushrooms','ham','cheese','eggs'], why:'quick'},
-            {dish:'loaded pizza revival', family:'toastie', ingredients:['pizza','cheese','tomatoes'], why:'leftover revival'}
-          ],
-          scored: [
-            {dish:`crispy ${protein} & ${carb} skillet`, scores:{deliciousness:9, time_fit:selectedMode==='quick'?8:7, use_soon:9, simplicity:8, texture:9, cleanup:9, efficiency:8}, weighted_total:8.6},
-            {dish:'mushroom ham cheese frittata', scores:{deliciousness:7, time_fit:9, use_soon:7, simplicity:9, texture:7, cleanup:8, efficiency:7}, weighted_total:7.8}
-          ],
-          winner: {selected_dish:`crispy garlic ${protein} & mushroom ${carb}`, family: carb.includes('pizza')?'toastie':'hash / skillet', use:[protein, carb, 'mushrooms','garlic','cheese'], optional:['tomatoes'], leave_out:['pizza','ham','juice'].filter(x=>!have.toLowerCase().includes(x) ? false : true), selection_reason:'best flavour coherence, uses priority ingredients, one-pan'},
-          culinary_check: {salt:'cheese + seasoning', fat:'oil + cheese', acid:'tomatoes optional for freshness', aromatics:'garlic present', moisture:'cheese melt', browning:'potatoes crisp first, mushrooms brown hard', texture:'crispy + soft + melted', fix_applied:'optional tomato for acid'},
-          recipe: {
-            title: has('potato')&&has('chicken') ? 'Crispy Garlic Chicken & Mushroom Potatoes' : has('pizza') ? 'Loaded Pizza with Ham & Mushrooms' : 'Crispy Chicken, Mushroom & Garlic Potato Skillet',
-            time: selectedMode==='quick'?'22 min':'40 min',
-            effort: 'one pan',
-            meta: `${selectedMode==='quick'?'22 min':'40 min'} · ${carb.includes('pizza')?'toastie':'one pan'} · uses mushrooms first`,
-            uses: [protein, carb, 'mushrooms','garlic','cheese'],
-            saves_for_later: have.split(',').filter(s=> !['chicken','potato','mushroom','garlic','cheese'].some(k=>s.toLowerCase().includes(k))).slice(0,3),
-            spoken_intro: `We're making ${has('potato')&&has('chicken') ? 'crispy garlic chicken and mushroom potatoes' : 'something with what you have'}. ${selectedMode==='quick'?'22 minutes, one pan':'Got time, so we can get proper browning.'} Using ${protein}, ${carb} and mushrooms. I'm leaving ${have.includes('pizza')?'the pizza':''} out — would make it stodgy.`,
-            steps: [
-              'Cut potatoes small so they cook quickly. Fry in oil with salt 6-7 min until browned and nearly tender.',
-              'Add mushrooms, let them brown properly before stirring.',
-              'Add garlic and leftover chicken, toss until hot.',
-              'Scatter cheese, cover 2 min to melt. Taste, season, serve.'
-            ]
-          }
+          winner: {selected_dish:"Crispy Garlic Chicken & Mushroom Potatoes", family:"hash / skillet", use: have.split(',').slice(0,4), optional:[], leave_out:[], selection_reason:"local fallback"},
+          recipe: {title:"Crispy Garlic Chicken & Mushroom Potatoes", time:"22 min", effort:"one pan", meta:"22 min · one pan", uses: have.split(',').slice(0,4), saves_for_later: have.split(',').slice(4), spoken_intro:"We're making crispy chicken and mushroom potatoes.", steps:["Cut potatoes small, fry 6-7 min","Add mushrooms, brown hard","Add garlic and chicken","Cheese, lid 2 min"]},
+          public: {title:"Crispy Garlic Chicken & Mushroom Potatoes", time:"22 min", effort:"one pan", meta:"22 min", uses: have.split(',').slice(0,4), saves_for_later: have.split(',').slice(4), spoken_intro:"We're making crispy chicken and mushroom potatoes.", steps:["Cut potatoes small","Add mushrooms","Add garlic and chicken","Cheese"]},
+          candidates: [], scored: [], culinary_check: {texture:"crispy+soft", fat:"oil", acid:"optional tomato"}
         }
       }
-      clearInterval(interval)
       setV1(data)
+      // Build cook session
+      setCookSession({
+        recipe_title: data.public?.title || data.recipe?.title,
+        selected_ingredients: data.winner?.use || data.public?.uses || [],
+        current_step: 0,
+        completed_steps: [],
+        active_step_text: data.public?.steps?.[0] || data.recipe?.steps?.[0],
+        substitutions: [],
+        active_timers: [],
+        all_steps: data.public?.steps || data.recipe?.steps,
+        winner: data.winner,
+        recipe: data.public || data.recipe
+      })
       setThinking(false)
       setStep('result')
-      setTimeout(()=> speak(data.recipe?.spoken_intro || data.recipe?.title), 300)
+      setTimeout(()=> speak(data.public?.spoken_intro || data.recipe?.spoken_intro), 300)
     }catch(e){
-      console.log(e)
-      setThinking(false)
-      alert('Thinking failed, check backend')
-      setStep('mode')
+      console.log(e); setThinking(false); setStep('mode')
     }
   }
 
-  const gestureState = listening? 'listening' : thinking? 'thinking' : speaking? 'speaking' : v1? 'done' : 'idle'
+  const startCook = ()=>{
+    if(!v1) return
+    setCookStep(0)
+    setCookSession(prev=> prev ? {...prev, current_step:0, active_step_text: prev.all_steps[0]} : prev)
+    setStep('cook')
+    speak(`Let's cook ${v1.public?.title || v1.recipe?.title}. Step 1: ${v1.public?.steps?.[0] || v1.recipe?.steps?.[0]}`)
+  }
+
+  const nextCookStep = ()=>{
+    if(!cookSession) return
+    const next = cookStep+1
+    if(next < cookSession.all_steps.length){
+      setCookStep(next)
+      setCookSession(prev=> ({...prev, current_step: next, completed_steps: [...prev.completed_steps, cookStep], active_step_text: prev.all_steps[next]}))
+      speak(cookSession.all_steps[next])
+    }else{
+      speak('Done! Dinner handled.')
+      setStep('result')
+    }
+  }
+
+  const askHelp = async (questionText)=>{
+    const q = questionText || helpQ
+    if(!q.trim() || !cookSession) return
+    setHelpThinking(true)
+    setHelpAnswer(null)
+    const API = import.meta.env.VITE_API_URL
+    try{
+      if(API){
+        const r = await fetch(`${API}/api/cook/help`,{
+          method:'POST',
+          headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({ session: cookSession, question: q })
+        })
+        const data = await r.json()
+        setHelpAnswer(data)
+        speak(data.spoken_response)
+        // Update session
+        setCookSession(prev=> ({
+          ...prev,
+          substitutions: [...prev.substitutions, ...(data.session_updates?.substitutions||[])],
+          active_timers: [...(prev.active_timers||[]), ...(data.session_updates?.active_timers||[])],
+          ...(data.updated_current_step ? {active_step_text: data.updated_current_step, all_steps: prev.all_steps.map((s,i)=> i===prev.current_step ? data.updated_current_step : s)} : {}),
+          ...(data.updated_future_steps ? {all_steps: data.updated_future_steps} : {})
+        }))
+      }else{
+        // local demo
+        const demo = {
+          type:"rescue",
+          spoken_response:"Turn the heat down now and add a small splash of water. Stir and give it 30 seconds.",
+          quick_action:"Turn heat down, splash water",
+          session_updates:{substitutions:[], active_timers:[]},
+          recipe_changed:false
+        }
+        setHelpAnswer(demo)
+        speak(demo.spoken_response)
+      }
+    }catch(e){
+      console.log(e)
+      setHelpAnswer({type:"general", spoken_response:"Could not reach help brain. Keep heat medium, add splash water if thick, taste as you go.", quick_action:"Medium heat, splash water", session_updates:{substitutions:[], active_timers:[]}, recipe_changed:false})
+    }finally{
+      setHelpThinking(false)
+    }
+  }
+
+  const gestureState = listening || helpListening ? 'listening' : thinking || helpThinking ? 'thinking' : speaking? 'speaking' : v1? 'done' : 'idle'
 
   if(!isAppView){
     return (
@@ -152,7 +213,7 @@ export default function App(){
 
   return (
     <div className="min-h-screen bg-[#FAF7F1] text-[#1A1A1A] flex justify-center">
-      <div className="w-full max-w-[480px] min-h-screen flex flex-col">
+      <div className="w-full max-w-[480px] min-h-screen flex flex-col relative">
         <header className="px-6 pt-10 pb-2 flex justify-between items-center">
           <div className="flex items-center gap-2"><DoneGesture state={gestureState}/><span className="font-bold text-[15px] ml-1">akchally</span></div>
           <div className="text-[11px] opacity-40 tracking-widest">
@@ -160,19 +221,18 @@ export default function App(){
             {step==='mode'&&'2 · HOW WE COOKING?'}
             {step==='thinking'&&'3 · AKCHALLY DECIDES'}
             {step==='result'&&'4 · RECIPE'}
-            {step==='cook'&&'COOK MODE'}
+            {step==='cook'&&`COOK · ${cookStep+1}/${cookSession?.all_steps?.length||0}`}
           </div>
         </header>
 
         {step==='inventory' && (
           <main className="px-6 pt-8 pb-10">
             <h1 className="text-[32px] font-bold leading-[0.95]">What have<br/>you got?</h1>
-            <p className="mt-3 text-[15px] text-[#7D846E]">Say it messy, I'll sort it.<br/>Pantry dump, voice is fine.</p>
+            <p className="mt-3 text-[15px] text-[#7D846E]">Say it messy, I'll sort it.</p>
             <div className="mt-8 relative">
               <textarea value={have} onChange={e=>setHave(e.target.value)} placeholder="I've got leftover chicken, three old pizza slices, two tomatoes, mushrooms that need using, potatoes, garlic, cheese, ham and eggs" className={`w-full min-h-[140px] p-5 pr-12 rounded-[20px] bg-[#EDE8DF] border text-[16px] outline-none ${listening?'border-[#C56A4A] bg-white':''}`} />
               <button onClick={startVoice} className={`absolute bottom-3 right-3 w-10 h-10 rounded-full flex items-center justify-center ${listening?'bg-[#C56A4A] text-white animate-pulse':'bg-white border'}`}>{listening?'■':'🎙'}</button>
             </div>
-            <p className="mt-3 text-[12px] text-[#7D846E]">{listening?'Standby — breath, keep talking':'or just tell me — tap mic, say your fridge'}</p>
             <button onClick={goToMode} disabled={!have.trim()} className="mt-10 w-full h-[56px] rounded-full bg-[#1A1A1A] text-white font-bold disabled:opacity-30">Next →</button>
           </main>
         )}
@@ -180,22 +240,19 @@ export default function App(){
         {step==='mode' && (
           <main className="px-6 pt-12 pb-10">
             <h1 className="text-[32px] font-bold leading-[0.9]">How are we<br/>cooking tonight?</h1>
-            <p className="mt-3 text-[13px] text-[#7D846E]">I'll handle cuisine, method, complexity. You just pick time.</p>
             <div className="mt-10 grid gap-4">
-              <button onClick={()=>chooseMode('quick')} className="text-left rounded-[24px] bg-white border p-6 hover:border-black transition-all">
+              <button onClick={()=>chooseMode('quick')} className="text-left rounded-[24px] bg-white border p-6">
                 <p className="text-[11px] tracking-widest font-bold opacity-40">MAKE IT QUICK</p>
                 <p className="text-[22px] font-bold mt-2">25 min · low effort</p>
-                <p className="text-[13px] text-[#7D846E] mt-1">One pan, max flavour, minimal cleanup. Crispy, fast, satisfying.</p>
-                <div className="mt-4 text-[11px] opacity-50">Target: 25 min · complexity low · cleanup low</div>
+                <p className="text-[13px] text-[#7D846E] mt-1">One pan, max flavour, minimal cleanup.</p>
               </button>
               <button onClick={()=>chooseMode('relaxed')} className="text-left rounded-[24px] bg-[#1A1A1A] text-white p-6">
                 <p className="text-[11px] tracking-widest font-bold opacity-40 text-white/60">I'VE GOT TIME</p>
                 <p className="text-[22px] font-bold mt-2">Up to 60 min · proper cooking</p>
-                <p className="text-[13px] text-white/70 mt-1">Roasting, slow browning, dough if needed. Deeper flavour.</p>
-                <div className="mt-4 text-[11px] opacity-50">Target: 60 min · allows roasting & slow browning</div>
+                <p className="text-[13px] text-white/70 mt-1">Roasting, slow browning, deeper flavour.</p>
               </button>
             </div>
-            <button onClick={()=>setStep('inventory')} className="mt-6 w-full text-[12px] opacity-40">← Back to ingredients</button>
+            <button onClick={()=>setStep('inventory')} className="mt-6 w-full text-[12px] opacity-40">← Back</button>
           </main>
         )}
 
@@ -203,110 +260,108 @@ export default function App(){
           <main className="px-6 pt-20 pb-10 flex flex-col items-center text-center">
             <DoneGesture state="thinking"/>
             <h2 className="mt-8 text-[24px] font-bold">AKCHALLY is deciding...</h2>
-            <p className="mt-2 text-[13px] text-[#7D846E] max-w-[300px]">Not using everything. Finding what actually belongs together.</p>
-            <div className="mt-10 w-full rounded-[20px] bg-white border p-5 text-left">
-              {[
-                'Interpreting pantry — leftovers, use-soon, fresh...',
-                'Identifying dish families — pasta, frittata, roast tray, stir-fry, bowl...',
-                'Building 3-5 candidate meals internally...',
-                'Scoring: deliciousness 30% · time fit 20% · use-soon 15% · simplicity 15%...',
-                'Selecting core — one protein, one starch, 1-2 veg, flavour direction...',
-                'Culinary check — fat? acid? salt? aromatics? texture? browning?'
-              ].map((t,i)=>(
-                <div key={i} className={`flex gap-3 py-2.5 border-b last:border-0 border-black/5 ${i===thinkingStage?'opacity-100':'opacity-30'} ${i<thinkingStage?'opacity-60':''}`}>
-                  <span className={`w-5 h-5 rounded-full flex items-center justify-center text-[11px] ${i<thinkingStage?'bg-[#7D846E] text-white':'bg-black/10'} ${i===thinkingStage?'bg-[#C56A4A] text-white animate-pulse':''}`}>{i<thinkingStage?'✓':i+1}</span>
-                  <span className="text-[13px] leading-[1.3]">{t}</span>
-                </div>
-              ))}
-            </div>
-            <p className="mt-6 text-[11px] opacity-40">Pantry dump → {have.split(',').length} items → picking 3-4 that make sense</p>
+            <p className="mt-2 text-[13px] text-[#7D846E]">Choosing what belongs together, not using everything.</p>
           </main>
         )}
 
         {step==='result' && v1 && (
           <main className="px-6 pt-8 pb-10">
             <div className="flex items-center justify-between mb-2">
-              <div className="flex items-center gap-2"><DoneGesture state={gestureState}/><span className="text-[11px] tracking-widest font-bold opacity-40">WE'RE MAKING THIS · {v1.winner?.family?.toUpperCase() || v1.recipe?.effort?.toUpperCase()}</span></div>
-              <button onClick={()=>speak(v1.recipe?.spoken_intro)} className={`w-8 h-8 rounded-full border flex items-center justify-center ${speaking?'bg-[#C56A4A] text-white animate-pulse':'bg-white'}`}>🔊</button>
+              <div className="flex items-center gap-2"><DoneGesture state={gestureState}/><span className="text-[11px] tracking-widest font-bold opacity-40">WE'RE MAKING THIS · {v1.winner?.family?.toUpperCase()}</span></div>
+              <button onClick={()=>speak(v1.public?.spoken_intro || v1.recipe?.spoken_intro)} className={`w-8 h-8 rounded-full border flex items-center justify-center ${speaking?'bg-[#C56A4A] text-white':'bg-white'}`}>🔊</button>
             </div>
-            
-            <h2 className="mt-4 text-[30px] font-bold leading-[0.9] tracking-tight">{v1.recipe?.title}</h2>
-            <p className="mt-3 text-[13px] text-[#7D846E]">{v1.recipe?.meta}</p>
-
-            {/* V1 Reasoning UI */}
-            <div className="mt-6 rounded-[16px] bg-[#EDE8DF] border p-4">
-              <p className="text-[10px] font-bold tracking-widest opacity-40">DISH CONCEPT</p>
-              <p className="text-[13px] font-medium mt-1">{v1.winner?.selected_dish || v1.recipe?.title} · {v1.mode_interpretation?.mode} mode</p>
-              {v1.candidates && (
+            <h2 className="mt-4 text-[30px] font-bold leading-[0.9]">{v1.public?.title || v1.recipe?.title}</h2>
+            <p className="mt-3 text-[13px] text-[#7D846E]">{v1.public?.meta || v1.recipe?.meta}</p>
+            <div className="mt-4 rounded-[16px] bg-[#EDE8DF] p-4">
+              <p className="text-[10px] font-bold tracking-widest opacity-40">USES</p>
+              <p className="text-[13px] font-medium mt-1">{v1.public?.uses?.join(', ') || v1.winner?.use?.join(', ')}</p>
+              {(v1.public?.saves_for_later?.length>0 || v1.winner?.leave_out?.length>0) && (
                 <>
-                  <p className="text-[10px] font-bold tracking-widest opacity-40 mt-4">CONSIDERED {v1.candidates.length} CANDIDATES</p>
-                  <div className="mt-1">
-                    {v1.candidates.slice(0,3).map((c,i)=>(
-                      <p key={i} className={`text-[11px] py-1 ${c.dish===v1.winner?.selected_dish || c.dish===v1.recipe?.title ? 'font-bold opacity-100' : 'opacity-50'}`}>• {c.dish} — {c.ingredients?.slice(0,3).join(', ')}</p>
-                    ))}
-                  </div>
-                </>
-              )}
-              {v1.scored && (
-                <>
-                  <p className="text-[10px] font-bold tracking-widest opacity-40 mt-3">TOP SCORE</p>
-                  <p className="text-[11px] opacity-70">{v1.scored[0]?.dish} — {v1.scored[0]?.weighted_total}/10 · deliciousness {v1.scored[0]?.scores?.deliciousness}/10</p>
+                  <p className="text-[10px] font-bold tracking-widest opacity-40 mt-3">SAVING FOR LATER</p>
+                  <p className="text-[11px] opacity-60 mt-1">{(v1.public?.saves_for_later || v1.winner?.leave_out || []).slice(0,4).join(', ')}</p>
                 </>
               )}
             </div>
-
-            <div className="mt-4 rounded-[16px] bg-white border p-4">
-              <p className="text-[10px] font-bold tracking-widest opacity-40">USES — earns its place</p>
-              <p className="text-[13px] mt-1 font-medium">{v1.recipe?.uses?.join(', ') || v1.winner?.use?.join(', ')}</p>
-              {v1.culinary_check && (
-                <p className="text-[11px] opacity-50 mt-2 italic">Balance: {v1.culinary_check.texture} · fat: {v1.culinary_check.fat} · acid: {v1.culinary_check.acid}</p>
-              )}
-              {(v1.recipe?.saves_for_later?.length>0 || v1.winner?.leave_out?.length>0) && (
-                <>
-                  <p className="text-[10px] font-bold tracking-widest opacity-40 mt-4">SAVING FOR LATER — would weaken dish</p>
-                  <div className="mt-1">
-                    {(v1.recipe?.saves_for_later || v1.winner?.leave_out || []).slice(0,4).map((ig,i)=>{
-                      const obj = typeof ig==='string'? {ingredient:ig, reason:'not needed for best flavour'} : ig
-                      return <p key={i} className="text-[11px] opacity-60 leading-[1.3]">• {obj.ingredient} {obj.reason?`— ${obj.reason}`:''}</p>
-                    })}
-                  </div>
-                </>
-              )}
-            </div>
-
             <div className="mt-6 rounded-[20px] bg-white border p-5">
-              {v1.recipe?.steps?.map((s,i)=><p key={i} className="text-[14px] py-2.5 border-b last:border-0 border-black/5 leading-[1.4]"><span className="font-bold mr-2">{i+1}.</span>{s}</p>)}
+              {(v1.public?.steps || v1.recipe?.steps)?.map((s,i)=><p key={i} className="text-[14px] py-2.5 border-b last:border-0 border-black/5"><span className="font-bold mr-2">{i+1}.</span>{s}</p>)}
             </div>
-
-            <button onClick={()=>{speak(`Let's cook ${v1.recipe.title}. Step 1: ${v1.recipe.steps[0]}`); setStep('cook'); setCookStep(0)}} className="mt-8 w-full h-[56px] rounded-full bg-[#1A1A1A] text-white font-bold">Cook this →</button>
-            <div className="mt-3 flex gap-2">
-              <button onClick={()=>setStep('mode')} className="flex-1 h-10 rounded-full bg-white border text-[12px]">Change time mode</button>
-              <button onClick={()=>{window.speechSynthesis.cancel(); setStep('inventory')}} className="flex-1 h-10 rounded-full bg-white border text-[12px] opacity-60">Edit ingredients</button>
-            </div>
+            <button onClick={startCook} className="mt-8 w-full h-[56px] rounded-full bg-[#1A1A1A] text-white font-bold">Cook this →</button>
           </main>
         )}
 
-        {step==='cook' && v1 && (
-          <div className="flex-1 flex flex-col">
+        {step==='cook' && cookSession && (
+          <div className="flex-1 flex flex-col pb-10">
             <div className="px-6 py-4 flex justify-between items-center">
-              <button onClick={()=>{window.speechSynthesis.cancel(); setStep('result')}} className="text-[12px]">← Back</button>
-              <span className="text-[11px] font-bold">{cookStep+1}/{v1.recipe.steps.length}</span>
-              <button onClick={()=>speak(v1.recipe.steps[cookStep])} className="px-3 py-1 rounded-full bg-white border text-[11px] font-bold">🔊 Speak</button>
+              <button onClick={()=>setStep('result')} className="text-[12px]">← Back</button>
+              <div className="flex items-center gap-2">
+                <button onClick={()=>speak(cookSession.active_step_text)} className={`px-3 py-1 rounded-full text-[11px] font-bold border ${speaking?'bg-[#C56A4A] text-white':'bg-white'}`}>🔊 Speak</button>
+                <button onClick={()=>setHelpOpen(true)} className="px-4 py-1.5 rounded-full bg-[#C56A4A] text-white text-[11px] font-bold tracking-widest">HELP!</button>
+              </div>
             </div>
-            <div className="px-6 pt-6">
-              <div className="rounded-[28px] bg-[#1A1A1A] text-white p-6">
-                <p className="text-[11px] opacity-50 tracking-widest">NOW · {v1.recipe.title}</p>
-                <p className="text-[22px] font-semibold mt-3 leading-[1.2]">{v1.recipe.steps[cookStep]}</p>
+            <div className="px-6 pt-2">
+              <div className="rounded-[28px] bg-[#1A1A1A] text-white p-6 min-h-[160px]">
+                <p className="text-[11px] opacity-50 tracking-widest">NOW · STEP {cookStep+1}</p>
+                <p className="text-[22px] font-semibold mt-3 leading-[1.2]">{cookSession.active_step_text}</p>
+                {cookSession.substitutions.length>0 && <p className="text-[11px] mt-4 opacity-60">Subs: {cookSession.substitutions.join(', ')}</p>}
+                {cookSession.active_timers.length>0 && <div className="mt-3 flex gap-2 flex-wrap">{cookSession.active_timers.map((t,i)=><span key={i} className="px-2 py-1 rounded-full bg-white/20 text-[11px]">⏱ {t.label} {t.minutes}m</span>)}</div>}
               </div>
               <div className="mt-6 grid grid-cols-2 gap-3">
-                <button disabled={cookStep===0} onClick={()=>setCookStep(s=>Math.max(0,s-1))} className="h-12 rounded-full border bg-white disabled:opacity-30">Prev</button>
-                <button onClick={()=>{if(cookStep<v1.recipe.steps.length-1){const n=cookStep+1; setCookStep(n); speak(v1.recipe.steps[n])} else {speak('Done! Dinner handled.'); setStep('result')}}} className="h-12 rounded-full bg-[#1A1A1A] text-white font-bold">{cookStep===v1.recipe.steps.length-1?'Done ✓':'Next →'}</button>
+                <button disabled={cookStep===0} onClick={()=>{const prev=cookStep-1; setCookStep(prev); setCookSession(s=>({...s, current_step:prev, active_step_text:s.all_steps[prev]}))}} className="h-12 rounded-full border bg-white disabled:opacity-30">Prev</button>
+                <button onClick={nextCookStep} className="h-12 rounded-full bg-[#1A1A1A] text-white font-bold">{cookStep===cookSession.all_steps.length-1?'Done ✓':'Next →'}</button>
               </div>
-              <div className="mt-8 rounded-[16px] bg-[#EDE8DF] p-4">
-                <p className="text-[11px] font-bold opacity-40">CULINARY CHECK</p>
-                <p className="text-[11px] mt-1 opacity-70">{v1.culinary_check?.texture} · {v1.culinary_check?.browning} · fat {v1.culinary_check?.fat}</p>
-              </div>
+              {helpAnswer && (
+                <div className="mt-6 rounded-[20px] bg-white border border-[#C56A4A]/30 p-5">
+                  <p className="text-[10px] font-bold tracking-widest text-[#C56A4A]">{helpAnswer.type?.toUpperCase()} · QUICK ACTION</p>
+                  <p className="text-[14px] font-bold mt-1">{helpAnswer.quick_action}</p>
+                  <p className="text-[13px] mt-2 leading-[1.4]">{helpAnswer.spoken_response}</p>
+                  {helpAnswer.updated_current_step && <p className="text-[11px] mt-3 opacity-60">Updated step: {helpAnswer.updated_current_step}</p>}
+                </div>
+              )}
             </div>
+
+            {/* HELP PANEL */}
+            {helpOpen && (
+              <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-end">
+                <div className="w-full bg-[#FAF7F1] rounded-t-[28px] max-w-[480px] mx-auto p-6 pb-10 max-h-[85vh] overflow-auto">
+                  <div className="flex justify-between items-center mb-4">
+                    <div className="flex items-center gap-2"><DoneGesture state={helpThinking?'thinking':helpListening?'listening':speaking?'speaking':'idle'}/><span className="font-bold">HELP!</span><span className="text-[11px] opacity-40">· {cookSession.recipe_title} · Step {cookStep+1}</span></div>
+                    <button onClick={()=>setHelpOpen(false)} className="w-8 h-8 rounded-full bg-black/5 flex items-center justify-center">✕</button>
+                  </div>
+
+                  <div className="rounded-[16px] bg-[#EDE8DF] p-3 text-[11px] opacity-70">
+                    <p>Context: {cookSession.recipe_title} · Step {cookStep+1}: {cookSession.active_step_text.slice(0,80)}...</p>
+                    <p>Using: {cookSession.selected_ingredients.join(', ')}</p>
+                  </div>
+
+                  <div className="mt-4 flex gap-2 flex-wrap">
+                    {["My sauce is too thick","Can I use yoghurt instead?","Potatoes still hard","Too much salt","Can I leave this 10 minutes?","What does brown hard mean?"].map(q=>(
+                      <button key={q} onClick={()=>{setHelpQ(q); askHelp(q)}} className="px-3 py-1.5 rounded-full bg-white border text-[11px]">{q}</button>
+                    ))}
+                  </div>
+
+                  <div className="mt-6 relative">
+                    <textarea value={helpQ} onChange={e=>setHelpQ(e.target.value)} placeholder="Ask anything — my sauce is too thick, can I use yoghurt instead..." className="w-full min-h-[80px] p-4 pr-12 rounded-[20px] bg-white border text-[14px] outline-none" />
+                    <button onClick={startHelpVoice} className={`absolute bottom-3 right-3 w-9 h-9 rounded-full flex items-center justify-center ${helpListening?'bg-[#C56A4A] text-white animate-pulse':'bg-black/5'}`}>{helpListening?'■':'🎙'}</button>
+                  </div>
+
+                  <button onClick={()=>askHelp()} disabled={!helpQ.trim() || helpThinking} className="mt-4 w-full h-12 rounded-full bg-[#1A1A1A] text-white font-bold disabled:opacity-30 flex items-center justify-center gap-2">
+                    {helpThinking? <><DoneGesture state="thinking"/><span>Fixing...</span></> : <>Ask Akchally →</>}
+                  </button>
+
+                  {helpAnswer && (
+                    <div className="mt-6 rounded-[20px] bg-white border p-5">
+                      <p className="text-[10px] font-bold tracking-widest text-[#C56A4A]">{helpAnswer.type?.toUpperCase()}</p>
+                      <p className="text-[13px] font-bold mt-2">Do this now: {helpAnswer.quick_action}</p>
+                      <p className="text-[14px] mt-3 leading-[1.4]">{helpAnswer.spoken_response}</p>
+                      <div className="mt-4 flex gap-2">
+                        <button onClick={()=>speak(helpAnswer.spoken_response)} className="px-3 py-1.5 rounded-full bg-black text-white text-[11px]">🔊 Replay</button>
+                        <button onClick={()=>{setHelpOpen(false); setHelpQ(""); setHelpAnswer(null)}} className="px-3 py-1.5 rounded-full bg-[#EDE8DF] text-[11px]">Got it, continue cooking →</button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
           </div>
         )}
       </div>
