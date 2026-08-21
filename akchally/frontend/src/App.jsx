@@ -3,8 +3,8 @@ import { useState, useEffect, useRef } from 'react'
 function DoneGesture({ state }){
   return (
     <div className="flex items-center gap-1.5">
-      <div className={`w-[22px] h-[7px] rounded-full bg-[#7D846E] origin-left transition-all ${state==='listening'?'animate-pulse':''} ${state==='thinking'?'animate-[wiggle_1.2s_ease-in-out_infinite]':''}`} style={{transform:'rotate(-12deg)'}} />
-      <div className={`w-[8px] h-[8px] rounded-full bg-[#C56A4A] transition-all ${state==='listening'?'animate-ping':''} ${state==='thinking'?'animate-pulse':''} ${state==='done'?'translate-x-0.5':''}`} />
+      <div className={`w-[22px] h-[7px] rounded-full bg-[#7D846E] origin-left transition-all ${state==='listening'?'animate-pulse':''} ${state==='thinking'?'animate-[wiggle_1.2s_ease-in-out_infinite]':''} ${state==='speaking'?'animate-[wiggle_0.6s_ease-in-out_infinite]':''}`} style={{transform:'rotate(-12deg)'}} />
+      <div className={`w-[8px] h-[8px] rounded-full bg-[#C56A4A] transition-all ${state==='listening'?'animate-ping':''} ${state==='thinking'?'animate-pulse':''} ${state==='speaking'?'animate-ping':''} ${state==='done'?'translate-x-0.5':''}`} />
     </div>
   )
 }
@@ -19,6 +19,7 @@ export default function App(){
   const [effort, setEffort] = useState(0)
   const [listening, setListening] = useState(false)
   const [thinking, setThinking] = useState(false)
+  const [speaking, setSpeaking] = useState(false)
   const [result, setResult] = useState(null)
   const [cookStep, setCookStep] = useState(0)
   const [cookMode, setCookMode] = useState(false)
@@ -40,60 +41,59 @@ export default function App(){
     else setShowInstallHelp(true)
   }
 
+  const speak = (text)=>{
+    if(!('speechSynthesis' in window)) return
+    window.speechSynthesis.cancel()
+    const u = new SpeechSynthesisUtterance(text)
+    u.rate = 0.96
+    u.pitch = 1.02
+    u.lang = 'en-US'
+    u.onstart = ()=> setSpeaking(true)
+    u.onend = ()=> setSpeaking(false)
+    window.speechSynthesis.speak(u)
+  }
+
   const startVoice = async ()=>{
-    try{
-      await navigator.mediaDevices.getUserMedia({audio:true})
-    }catch(e){
-      alert('Mic blocked — Chrome → lock icon → Permissions → Microphone → Allow')
+    try{ await navigator.mediaDevices.getUserMedia({audio:true}) }catch(e){
+      alert('Mic blocked — Chrome → lock → Permissions → Microphone → Allow')
       return
     }
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition
-    if(!SR){
-      alert('Use CHROME on Android for voice. Samsung Internet does not support voice.')
-      return
-    }
-    if(listening){
-      recRef.current?.stop()
-      setListening(false)
-      return
-    }
+    if(!SR){ alert('Use CHROME on Android for voice'); return }
+    if(listening){ recRef.current?.stop(); setListening(false); return }
     const rec = new SR()
     rec.lang = 'en-US'
     rec.interimResults = true
     rec.continuous = false
-    rec.onstart = ()=>{
-      setListening(true)
-      setHave('Listening... say what you got')
-    }
+    rec.onstart = ()=>{ setListening(true); setHave('Listening... say what you got') }
     rec.onresult = (e)=>{
       let txt = ''
       for(let i=0;i<e.results.length;i++) txt += e.results[i][0].transcript + ' '
       setHave(txt.trim())
     }
-    rec.onerror = (e)=>{
-      alert('Voice error: ' + e.error)
-      setListening(false)
-    }
-    rec.onend = ()=>{
-      setListening(false)
-    }
+    rec.onend = ()=> setListening(false)
+    rec.onerror = ()=> setListening(false)
     recRef.current = rec
     rec.start()
   }
 
   const sortDinner = ()=>{
+    window.speechSynthesis.cancel()
     setThinking(true)
     setTimeout(()=>{
       const recipes = {
-        0:{title:"Creamy garlic spinach pasta", meta:"25 min · one pan · using what you've got", steps:["Boil water heavily salted. Pasta in 9 min.","Butter low, garlic sliced, don't burn.","2 ladles pasta water into butter — that's the sauce.","Drain pasta toss, spinach wilt 1 min.","Pepper. Done."]},
-        1:{title:"Sheet pan eggs + greens + toast", meta:"28 min · one tray · use what's here", steps:["Oven 220C. Oiled tray.","Spinach garlic butter on tray 5 min.","Crack eggs on top 8 min.","Toast if you have."]},
-        2:{title:"Miso butter noodles + greens + egg", meta:"32 min · two pans · a bit more", steps:["Boil noodles save water.","Butter miso garlic melt.","Noodles in gloss with water.","Fry egg + greens."]},
+        0:{title:"Creamy garlic spinach pasta", meta:"25 min · one pan · using what you've got", speak:"We're making creamy garlic spinach pasta. 25 minutes, one pan, using what you've got. Boil pasta, garlic butter, toss that spinach that's about to die — done.", steps:["Boil water heavily salted. Pasta in 9 min.","Butter low, garlic sliced, don't burn.","2 ladles pasta water into butter — that's the sauce.","Drain pasta toss, spinach wilt 1 min.","Pepper. Done."]},
+        1:{title:"Sheet pan eggs + greens + toast", meta:"28 min · one tray · use what's here", speak:"We're making sheet pan eggs with greens. 28 minutes, one tray. Nice and easy.", steps:["Oven 220C. Oiled tray.","Spinach garlic butter on tray 5 min.","Crack eggs on top 8 min.","Toast if you have."]},
+        2:{title:"Miso butter noodles + greens + egg", meta:"32 min · two pans · a bit more", speak:"We're making miso butter noodles with greens and egg. 32 minutes, worth it.", steps:["Boil noodles save water.","Butter miso garlic melt.","Noodles in gloss with water.","Fry egg + greens."]},
       }
-      setResult(recipes[effort]); setThinking(false); setCookMode(false); setCookStep(0)
+      const r = recipes[effort]
+      setResult(r); setThinking(false); setCookMode(false); setCookStep(0)
+      // CONVERSATIONAL VOICE OUT
+      setTimeout(()=> speak(r.speak + " Want to cook it?"), 200)
     }, 900)
   }
 
-  const gestureState = listening? 'listening' : thinking? 'thinking' : result? 'done' : 'idle'
+  const gestureState = listening? 'listening' : thinking? 'thinking' : speaking? 'speaking' : result? 'done' : 'idle'
 
   if(!isAppView){
     return (
@@ -179,31 +179,35 @@ export default function App(){
           </main>
         ) : !cookMode && result ? (
           <main className="px-6 pt-12 pb-10">
-            <div className="flex items-center gap-2 mb-8"><DoneGesture state="done"/><span className="text-[11px] tracking-[0.14em] font-bold opacity-40">WE'RE MAKING THIS</span></div>
+            <div className="flex items-center justify-between mb-8">
+              <div className="flex items-center gap-2"><DoneGesture state={gestureState}/><span className="text-[11px] tracking-[0.14em] font-bold opacity-40">WE'RE MAKING THIS</span></div>
+              <button onClick={()=>speak(result.speak)} className={`w-8 h-8 rounded-full flex items-center justify-center border ${speaking?'bg-[#C56A4A] text-white animate-pulse':'bg-white'}`}>🔊</button>
+            </div>
             <h2 className="text-[30px] font-bold leading-[0.95] tracking-tight">{result.title}</h2>
             <p className="mt-3 text-[13px] text-[#7D846E]">{result.meta}</p>
             <div className="mt-8 rounded-[20px] bg-white border p-5">
               {result.steps.slice(0,2).map((s,i)=><p key={i} className="text-[14px] leading-[1.4] py-2 border-b last:border-0 border-black/5"><span className="font-bold mr-2">{i+1}.</span>{s}</p>)}
               <p className="text-[11px] opacity-40 mt-3">+ {result.steps.length-2} more steps in cook mode</p>
             </div>
-            <button onClick={()=>setCookMode(true)} className="mt-8 w-full h-[56px] rounded-full bg-[#1A1A1A] text-white font-bold">Cook this →</button>
-            <button onClick={()=>setResult(null)} className="mt-3 w-full text-[12px] opacity-50">Not feeling it? Give me another</button>
+            <button onClick={()=>{speak(`Let's cook ${result.title}. Step 1: ${result.steps[0]}`); setCookMode(true)}} className="mt-8 w-full h-[56px] rounded-full bg-[#1A1A1A] text-white font-bold">Cook this →</button>
+            <button onClick={()=>{window.speechSynthesis.cancel(); setResult(null)}} className="mt-3 w-full text-[12px] opacity-50">Not feeling it? Give me another</button>
           </main>
         ) : (
           <div className="flex-1 flex flex-col">
             <div className="px-6 py-4 flex justify-between items-center">
-              <button onClick={()=>setCookMode(false)} className="text-[12px]">← Back</button>
-              <div className="flex items-center gap-2"><DoneGesture state={listening?'listening':'idle'}/><span className="text-[11px] font-bold tracking-widest">{cookStep+1}/{result.steps.length}</span></div>
-              <button onClick={()=>alert('Too salty? Lemon. Split? Off heat, cold yoghurt whisk. Bland? Acid before salt.')} className="px-3 py-1 rounded-full bg-[#C56A4A] text-white text-[11px] font-bold">HELP</button>
+              <button onClick={()=>{window.speechSynthesis.cancel(); setCookMode(false)}} className="text-[12px]">← Back</button>
+              <div className="flex items-center gap-2"><DoneGesture state={gestureState}/><span className="text-[11px] font-bold tracking-widest">{cookStep+1}/{result.steps.length}</span></div>
+              <button onClick={()=>speak(result.steps[cookStep])} className={`px-3 py-1 rounded-full text-[11px] font-bold ${speaking?'bg-[#C56A4A] text-white':'bg-white border'}`}>🔊 Speak</button>
             </div>
             <div className="px-6 pt-6">
               <div className="rounded-[28px] bg-[#1A1A1A] text-white p-6 min-h-[160px]">
                 <p className="text-[11px] opacity-50 tracking-widest">NOW</p>
                 <p className="text-[22px] font-semibold leading-[1.2] mt-3">{result.steps[cookStep]}</p>
+                <button onClick={()=>speak(result.steps[cookStep])} className="mt-4 text-[11px] opacity-60 underline">Replay step 🔊</button>
               </div>
               <div className="mt-6 grid grid-cols-2 gap-3">
                 <button disabled={cookStep===0} onClick={()=>setCookStep(s=>Math.max(0,s-1))} className="h-12 rounded-full border bg-white disabled:opacity-30">Prev</button>
-                <button onClick={()=>{if(cookStep<result.steps.length-1)setCookStep(s=>s+1); else {setResult(null); setCookMode(false)}}} className="h-12 rounded-full bg-[#1A1A1A] text-white font-bold">{cookStep===result.steps.length-1?'Done ✓':'Next →'}</button>
+                <button onClick={()=>{if(cookStep<result.steps.length-1){const n=cookStep+1; setCookStep(n); speak(result.steps[n])} else {speak('Done! You did it.'); setResult(null); setCookMode(false)}}} className="h-12 rounded-full bg-[#1A1A1A] text-white font-bold">{cookStep===result.steps.length-1?'Done ✓':'Next →'}</button>
               </div>
             </div>
           </div>
