@@ -40,14 +40,31 @@ export default function App(){
     else setShowInstallHelp(true)
   }
 
-  const startVoice = ()=>{
+    const startVoice = ()=>{
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition
-    if(!SR) return alert('Use Chrome on Android for voice')
-    const rec = new SR(); rec.lang='en-ZA'; rec.interimResults=false
-    rec.onstart=()=>setListening(true)
-    rec.onend=()=>setListening(false)
-    rec.onresult=(e)=>{ setHave(e.results[0][0].transcript); setListening(false) }
-    rec.start(); recRef.current=rec
+    if(!SR) return alert('Voice needs Chrome on Android — use Chrome, not Samsung Internet')
+    if(listening && recRef.current){ recRef.current.stop(); setListening(false); return }
+
+    const rec = new SR()
+    rec.lang='en-ZA'
+    rec.interimResults = true // <-- this makes writing appear as you speak
+    rec.continuous = false
+    rec.maxAlternatives = 1
+
+    rec.onstart=()=>{ setListening(true); setHave('') }
+    rec.onend=()=> setListening(false)
+    rec.onerror=(e)=>{ console.log(e); setListening(false) }
+
+    rec.onresult=(e)=>{
+      let text = ''
+      for(let i=0; i<e.results.length; i++){
+        text += e.results[i][0].transcript + ' '
+      }
+      setHave(text.trim()) // writes live into the box
+    }
+
+    rec.start()
+    recRef.current=rec
   }
 
   const sortDinner = ()=>{
@@ -110,10 +127,10 @@ export default function App(){
             {/* Input - no outer box, oatmeal field, mic inside */}
             <div className="mt-8 relative">
               <textarea
-                value={have}
-                onChange={e=>setHave(e.target.value)}
-                className="w-full min-h- p-5 pr-12 rounded- bg-[#EDE8DF] border border-black/[0.06] text- leading-[1.4] placeholder:text-black/30 outline-none focus:border-[#7D846E]/30 focus:bg-[#EDE8DF] transition-all"
-              />
+  value={have}
+  onChange={e=>setHave(e.target.value)}
+  placeholder="..."
+/>
               <button onClick={startVoice} className={`absolute bottom-3 right-3 w-9 h-9 rounded-full flex items-center justify-center transition-all ${listening?'bg-[#C56A4A] text-white animate-pulse':'bg-white border border-black/10'}`}>
                 {listening?'●':'🎙'}
               </button>
