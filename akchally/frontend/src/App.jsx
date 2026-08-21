@@ -3,10 +3,100 @@ import { useState, useEffect, useRef } from 'react'
 function DoneGesture({ state }){
   return (
     <div className="flex items-center gap-1.5">
-      <div className={`w-[22px] h-[7px] rounded-full bg-[#7D846E] origin-left transition-all ${state==='listening'?'animate-pulse':''} ${state==='thinking'?'animate-[wiggle_1.2s_ease-in-out_infinite]':''} ${state==='speaking'?'animate-[wiggle_0.6s_ease-in-out_infinite]':''}`} style={{transform:'rotate(-12deg)'}} />
-      <div className={`w-[8px] h-[8px] rounded-full bg-[#C56A4A] transition-all ${state==='listening'?'animate-ping':''} ${state==='thinking'?'animate-pulse':''} ${state==='speaking'?'animate-ping':''}`} />
+      <div className={`w-[22px] h-[7px] rounded-full bg-[#7D846E] origin-left ${state==='listening'?'animate-pulse':''} ${state==='thinking'?'animate-[wiggle_1.2s_ease-in-out_infinite]':''} ${state==='speaking'?'animate-[wiggle_0.6s_ease-in-out_infinite]':''}`} style={{transform:'rotate(-12deg)'}} />
+      <div className={`w-[8px] h-[8px] rounded-full bg-[#C56A4A] ${state==='listening'?'animate-ping':''} ${state==='thinking'?'animate-pulse':''} ${state==='speaking'?'animate-ping':''}`} />
     </div>
   )
+}
+
+function cleanAndPick(haveText){
+  const raw = haveText.toLowerCase()
+  // Split by comma, and, plus, with, for, &, +, ·
+  let parts = raw.split(/,| and | plus | with | & | \+ | for | · |\n/).map(s=>s.trim()).filter(Boolean)
+  
+  const cleaned = parts.map(p=>{
+    return p
+      .replace(/\d+/g,'')
+      .replace(/three|two|one|some|slices|slice|pieces|piece|handful|leftover|left over|old|about to die|thats|that's/g,'')
+      .replace(/slices of a|slices of|of a|of/g,'')
+      .replace(/\s+/g,' ')
+      .trim()
+  }).filter(s=>s.length>2)
+
+  // Categorize
+  const is = (word, list)=> list.some(k=> word.includes(k))
+  const buckets = { protein:[], carb:[], veg:[], dairy:[], ignore:[] }
+
+  cleaned.forEach(w=>{
+    if(is(w, ['juice','coke','milkshake','water','soda','beer'])){ buckets.ignore.push(w); return }
+    if(is(w, ['chicken','ham','egg','bacon','sausage','beef','pork','fish','basha','steak','turkey'])) buckets.protein.push(w)
+    else if(is(w, ['potato','pizza','pasta','rice','bread','noodle','tortilla','couscous'])) buckets.carb.push(w)
+    else if(is(w, ['tomato','mushroom','garlic','onion','spinach','pepper','capsicum','zucchini','courgette','broccoli','peas','carrot','herb','parsley','coriander'])) buckets.veg.push(w)
+    else if(is(w, ['cheese','butter','cream','yogurt','yoghurt','mozzarella','cheddar'])) buckets.dairy.push(w)
+    else if(is(w, ['spice','spices','chilli','chili','salt','pepper','curry','masala'])) buckets.veg.push(w) // treat as flavour
+    else buckets.veg.push(w) // default to usable
+  })
+
+  // Pick best combo - max 4 ingredients that make sense together
+  const protein = buckets.protein[0] || null
+  const carb = buckets.carb[0] || null
+  const veg1 = buckets.veg[0] || null
+  const veg2 = buckets.veg[1] || null
+  const dairy = buckets.dairy[0] || null
+
+  const picks = [protein, carb, veg1, dairy].filter(Boolean).slice(0,4)
+  if(picks.length<2) picks.push(...buckets.veg.slice(0,2))
+
+  const leftovers = cleaned.filter(c=> !picks.some(p=> c.includes(p) || p.includes(c)) && !buckets.ignore.includes(c))
+
+  return { picks, leftovers, buckets, cleaned }
+}
+
+function makeDelicious(haveText, effort){
+  const { picks, leftovers, buckets } = cleanAndPick(haveText)
+  const has = (k)=> haveText.toLowerCase().includes(k)
+
+  let title, meta, steps, speak
+
+  const protein = buckets.protein[0] || 'egg'
+  const carb = buckets.carb[0] || ''
+  const veg = buckets.veg.slice(0,2).join(' & ')
+  const cheese = buckets.dairy.find(d=>d.includes('cheese'))
+
+  // SMART TITLE - not concatenation
+  if(carb && carb.includes('pizza')){
+    const topping = [protein, buckets.veg[0]].filter(Boolean).join(' & ')
+    title = topping ? `Loaded pizza with ${topping}${cheese ? ' & cheese' : ''}` : `Crispy leftover pizza pan`
+  } else if(carb && carb.includes('potato')){
+    if(protein && has('chicken')) title = `Crispy chicken, potato & mushroom hash${cheese ? ' with cheese' : ''}`
+    else if(protein) title = `Potato & ${protein} hash with ${veg || 'garlic'}`
+    else title = `Crispy garlicky potatoes with ${veg || 'herbs'}`
+  } else if(carb && carb.includes('pasta')){
+    title = protein ? `${protein} pasta with ${veg || 'garlic'}` : `Garlic ${veg ? veg + ' ' : ''}pasta`
+  } else if(protein){
+    if(buckets.carb.length) title = `${protein} + ${buckets.carb[0]} — sorted`
+    else title = `One-pan ${protein} with ${veg || 'tomatoes'}`
+  } else {
+    title = `${picks.slice(0,2).join(' & ')} — sorted`
+  }
+
+  title = title.replace(/\b\w/g, l=>l.toUpperCase()).replace(' & ',' & ').trim()
+  if(title.length>45) title = title.split(' With ')[0]
+
+  meta = `${effort===0?'12 min':'22 min'} · one pan · uses ${picks.join(', ')}`
+  
+  // STEPS that only use picks, mention leftovers as optional
+  steps = [
+    `You said: ${haveText}. We're using: ${picks.join(', ')}${leftovers.length?` — saving ${leftovers.slice(0,2).join(', ')} for next time.`:'.'}`,
+    `Hot pan, ${has('butter')?'butter':'oil'}. ${carb ? `Crisp ${carb} first 4 min.` : `${protein ? `Brown ${protein} hard 4 min.` : 'Veg in first.'}`}`,
+    `${veg ? `Add ${veg} + ${has('garlic')?'garlic':''} — 3 min until soft.` : 'Add veg — 3 min.'} ${cheese ? `Then ${cheese} to melt.` : ''}`,
+    `Season — ${has('spice')||has('spices')?'use your spices':'salt, pepper, lemon if you have'}. Toss.`,
+    `Done. Not the whole fridge, just the good bits.`
+  ]
+
+  speak = `We're making ${title}. Uses ${picks.join(', ')}. ${leftovers.length?`I'm leaving ${leftovers.slice(0,2).join(' and ')} out — that would be too much.`:''} ${effort===0?'Bare minimum, 12 minutes, one pan.':''} Want to cook it?`
+
+  return { title, meta, steps, speak, picks, leftovers, used: picks.join(', ') }
 }
 
 export default function App(){
@@ -14,7 +104,7 @@ export default function App(){
   const [deferredPrompt, setDeferredPrompt] = useState(null)
   const [showInstallHelp, setShowInstallHelp] = useState(false)
   const [platform, setPlatform] = useState('android')
-  const [have, setHave] = useState("") // EMPTY - example is placeholder only
+  const [have, setHave] = useState("")
   const [effort, setEffort] = useState(0)
   const [listening, setListening] = useState(false)
   const [thinking, setThinking] = useState(false)
@@ -22,7 +112,6 @@ export default function App(){
   const [result, setResult] = useState(null)
   const [cookStep, setCookStep] = useState(0)
   const [cookMode, setCookMode] = useState(false)
-
   const recRef = useRef(null)
   const isListeningRef = useRef(false)
 
@@ -51,59 +140,24 @@ export default function App(){
     window.speechSynthesis.speak(u)
   }
 
-  // STANDBY LISTENING - doesn't cut off on breath
   const startVoice = async ()=>{
-    try{ await navigator.mediaDevices.getUserMedia({audio:true}) }catch(e){ alert('Mic blocked — Chrome → lock → Allow microphone'); return }
+    try{ await navigator.mediaDevices.getUserMedia({audio:true}) }catch(e){ alert('Mic blocked — Chrome → lock → Allow'); return }
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition
-    if(!SR){ alert('Use CHROME for voice'); return }
-
-    if(isListeningRef.current){
-      isListeningRef.current = false
-      recRef.current?.stop()
-      setListening(false)
-      return
-    }
-
-    const rec = new SR()
-    rec.lang='en-US'
-    rec.interimResults=true
-    rec.continuous=true // STANDBY
-    rec.maxAlternatives=1
+    if(!SR){ alert('Use CHROME'); return }
+    if(isListeningRef.current){ isListeningRef.current=false; recRef.current?.stop(); setListening(false); return }
+    const rec = new SR(); rec.lang='en-US'; rec.interimResults=true; rec.continuous=true
     let finalText = have
-
-    rec.onstart=()=>{
-      isListeningRef.current = true
-      setListening(true)
-      if(!finalText) setHave('Listening... keep talking, tap mic again to stop')
-    }
+    rec.onstart=()=>{ isListeningRef.current=true; setListening(true); if(!finalText) setHave('Listening... keep talking, tap ■ to stop') }
     rec.onresult=(e)=>{
-      let interim = ''
-      let finalChunk = ''
-      for(let i=e.resultIndex; i<e.results.length; i++){
-        const t = e.results[i][0].transcript
-        if(e.results[i].isFinal) finalChunk += t + ' '
-        else interim += t
-      }
-      if(finalChunk) finalText = (finalText + ' ' + finalChunk).trim()
-      const display = (finalText + ' ' + interim).replace('Listening... keep talking, tap mic again to stop','').trim()
+      let interim='', finalChunk=''
+      for(let i=e.resultIndex;i<e.results.length;i++){ const t=e.results[i][0].transcript; if(e.results[i].isFinal) finalChunk+=t+' '; else interim+=t }
+      if(finalChunk) finalText=(finalText+' '+finalChunk).trim()
+      const display=(finalText+' '+interim).replace('Listening... keep talking, tap ■ to stop','').trim()
       if(display) setHave(display)
-      else if(interim) setHave(interim)
     }
-    rec.onerror=(e)=>{
-      if(e.error==='no-speech') return
-      isListeningRef.current=false
-      setListening(false)
-    }
-    rec.onend=()=>{
-      if(isListeningRef.current){
-        try{ rec.start() }catch{}
-      }else{
-        setListening(false)
-        setHave(prev=> prev.replace('Listening... keep talking, tap mic again to stop','').trim())
-      }
-    }
-    recRef.current=rec
-    try{ rec.start() }catch{}
+    rec.onend=()=>{ if(isListeningRef.current){ try{rec.start()}catch{}}else{ setListening(false); setHave(prev=>prev.replace('Listening... keep talking, tap ■ to stop','').trim()) } }
+    rec.onerror=(e)=>{ if(e.error==='no-speech') return; isListeningRef.current=false; setListening(false) }
+    recRef.current=rec; try{rec.start()}catch{}
   }
 
   const sortDinner = async ()=>{
@@ -115,36 +169,17 @@ export default function App(){
       try{
         const r = await fetch(`${API}/api/recipe`,{method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({transcript:have, timeVibe: effort===0?'bare minimum':effort===1?'normal':'feel like cooking'})})
         const data = await r.json()
-        if(data.recipes && data.recipes[0]){
-          const first = data.recipes[0]
-          const real = { title: first.title, meta: `${first.time || '20 min'} · using ${have.split(',').slice(0,2).join(' + ')}`, speak: data.spoken_response || `We're making ${first.title}`, steps: first.steps, used: have }
+        if(data.recipes?.[0]){
+          const f=data.recipes[0]
+          const real={title:f.title, meta:`${f.time||'15 min'} · uses ${f.ingredients_used?.slice(0,3).join(', ')||'some of what you have'}`, speak:data.spoken_response||`We're making ${f.title}`, steps:f.steps, used:f.ingredients_used?.join(', ')||have, leftovers:[]}
           setResult(real); setThinking(false); speak(real.speak); return
         }
-      }catch(e){}
+      }catch{}
     }
     setTimeout(()=>{
-      const raw = have.toLowerCase()
-      const has = (w)=> raw.includes(w)
-      const ingredients = have.split(',').map(s=>s.trim()).filter(Boolean)
-      const main = ingredients[0] || 'what you got'
-      const second = ingredients[1] || ''
-      let title, meta, steps, speakText
-      if(has('pasta') || has('noodle')){
-        title = has('garlic') ? `${main} garlic pasta` : `${main} pasta`
-        meta = `${effort===0?'20 min':'28 min'} · one pan · using ${ingredients.slice(0,2).join(' + ')}`
-        steps = [`Boil water, salt hard. Cook ${main} — 9 min.`, `Low heat, melt ${has('butter')?'butter':'oil'}, add ${has('garlic')?'garlic':''} — don't burn.`, `2 ladles starchy water into pan — sauce from what you got.`, `Toss: ${have}.`, `Pepper. Done.`]
-      }else if(has('egg')){
-        title = `${main} + eggs`
-        meta = `${effort===0?'12 min':'22 min'} · one pan · using ONLY what you typed`
-        steps = [`Heat pan, ${has('butter')?'butter':'oil'} medium.`, `Add ${ingredients.filter(i=>!i.toLowerCase().includes('egg')).join(', ') || 'veg'} — 3 min.`, `Crack eggs on top, lid 4 min.`, `Season. Eat from pan.`]
-      }else{
-        title = `${main} ${second?'+ '+second:''} — sorted`
-        meta = `Using ONLY: ${have} · ${effort===0?'bare minimum':effort===1?'normal':'feel like cooking'}`
-        steps = [`You have: ${have}.`, `Heat ${has('butter')?'butter':'oil'}, hardest veg first.`, `Add rest in order.`, `Splash water for sauce.`, `Done.`]
-      }
-      speakText = `We're making ${title}. ${meta}. Using only what you said. Want to cook it?`
-      setResult({title, meta, steps, speak: speakText, used: have}); setThinking(false); setCookStep(0)
-      setTimeout(()=>speak(speakText), 200)
+      const r = makeDelicious(have, effort)
+      setResult(r); setThinking(false); setCookStep(0)
+      setTimeout(()=>speak(r.speak), 200)
     }, 600)
   }
 
@@ -162,15 +197,6 @@ export default function App(){
             <button onClick={handleDownload} className="mt-8 w-full h-[56px] rounded-full bg-[#1A1A1A] text-white font-bold tracking-widest">DOWNLOAD</button>
             <button onClick={()=>setIsAppView(true)} className="mt-4 text-[12px] underline opacity-40">Already have it? Open app</button>
           </div>
-          {showInstallHelp && (
-            <div className="fixed inset-0 bg-black/40 backdrop-blur flex items-end p-4 z-50">
-              <div className="w-full bg-white rounded-[28px] p-6 max-w-[400px] mx-auto">
-                <h3 className="font-bold">Install Akchally</h3>
-                <p className="mt-3 text-[14px]">Tap Add to Home Screen when prompted.</p>
-                <button onClick={()=>{setShowInstallHelp(false); setIsAppView(true)}} className="mt-5 w-full h-12 rounded-full bg-black text-white font-bold">Got it</button>
-              </div>
-            </div>
-          )}
         </div>
       </div>
     )
@@ -194,7 +220,7 @@ export default function App(){
             </div>
             <div className={`mt-3 flex items-center gap-2 text-[12px] font-medium ${listening?'text-[#C56A4A]':'text-[#7D846E]'}`}>
               <span className={`w-5 h-5 rounded-full border flex items-center justify-center ${listening?'bg-[#C56A4A] text-white animate-pulse':''}`}>{listening?'■':'🎙'}</span>
-              {listening?'Standby listening — breath, think, keep talking. Tap ■ to stop':'or just tell me — tap mic, keep talking'}
+              {listening?'Standby — keep talking, tap ■ to stop':'or just tell me — tap mic'}
             </div>
             <div className="mt-10">
               <p className="text-[11px] tracking-[0.14em] font-bold opacity-40">HOW MUCH EFFORT?</p>
@@ -203,11 +229,6 @@ export default function App(){
                   <button key={o.k} onClick={()=>setEffort(o.k)} className={`flex-1 h-[36px] rounded-full text-[12.5px] font-semibold transition-all ${effort===o.k?'bg-[#1A1A1A] text-white shadow-sm':'text-black/60'}`}>{o.l}</button>
                 ))}
               </div>
-            </div>
-            <div className="mt-6 flex gap-2 flex-wrap">
-              <button className="px-3 py-1.5 rounded-full bg-white border border-black/10 text-[11px] font-medium">Tonight · Any time</button>
-              <button className="px-3 py-1.5 rounded-full bg-white border border-black/10 text-[11px] font-medium">Use what's here</button>
-              <button className="px-3 py-1.5 rounded-full bg-white border border-black/10 text-[11px] font-medium">2 people</button>
             </div>
             <button onClick={sortDinner} className="mt-10 w-full h-[56px] rounded-full bg-[#1A1A1A] text-white font-bold text-[15px] flex items-center justify-center gap-2">
               {thinking? <><DoneGesture state="thinking"/><span className="ml-2">Sorting...</span></> : <>Sort dinner out →</>}
@@ -219,15 +240,15 @@ export default function App(){
               <div className="flex items-center gap-2"><DoneGesture state={gestureState}/><span className="text-[11px] tracking-[0.14em] font-bold opacity-40">WE'RE MAKING THIS</span></div>
               <button onClick={()=>speak(result.speak)} className={`w-8 h-8 rounded-full flex items-center justify-center border ${speaking?'bg-[#C56A4A] text-white animate-pulse':'bg-white'}`}>🔊</button>
             </div>
-            <h2 className="text-[30px] font-bold leading-[0.95] tracking-tight">{result.title}</h2>
+            <h2 className="text-[28px] font-bold leading-[0.95] tracking-tight">{result.title}</h2>
             <p className="mt-3 text-[13px] text-[#7D846E]">{result.meta}</p>
-            <div className="mt-2 text-[11px] opacity-40">Using: {result.used}</div>
+            <div className="mt-2 text-[11px] leading-[1.4]"><span className="font-bold opacity-60">Uses:</span> <span className="opacity-70">{result.used}</span>{result.leftovers?.length ? <span className="opacity-40"> · Saving {result.leftovers.slice(0,2).join(', ')} for later</span>:null}</div>
             <div className="mt-6 rounded-[20px] bg-white border p-5">
               {result.steps.slice(0,2).map((s,i)=><p key={i} className="text-[14px] leading-[1.4] py-2 border-b last:border-0 border-black/5"><span className="font-bold mr-2">{i+1}.</span>{s}</p>)}
               <p className="text-[11px] opacity-40 mt-3">+ {result.steps.length-2} more steps in cook mode</p>
             </div>
             <button onClick={()=>{speak(`Let's cook ${result.title}. Step 1: ${result.steps[0]}`); setCookMode(true)}} className="mt-8 w-full h-[56px] rounded-full bg-[#1A1A1A] text-white font-bold">Cook this →</button>
-            <button onClick={()=>{window.speechSynthesis.cancel(); setResult(null)}} className="mt-3 w-full text-[12px] opacity-50">Not feeling it? Give me another</button>
+            <button onClick={()=>{window.speechSynthesis.cancel(); setResult(null)}} className="mt-3 w-full text-[12px] opacity-50">Not feeling it? Give me another (picks different combo)</button>
           </main>
         ) : (
           <div className="flex-1 flex flex-col">
@@ -240,11 +261,10 @@ export default function App(){
               <div className="rounded-[28px] bg-[#1A1A1A] text-white p-6 min-h-[160px]">
                 <p className="text-[11px] opacity-50 tracking-widest">NOW</p>
                 <p className="text-[22px] font-semibold leading-[1.2] mt-3">{result.steps[cookStep]}</p>
-                <button onClick={()=>speak(result.steps[cookStep])} className="mt-4 text-[11px] opacity-60 underline">Replay step 🔊</button>
               </div>
               <div className="mt-6 grid grid-cols-2 gap-3">
                 <button disabled={cookStep===0} onClick={()=>setCookStep(s=>Math.max(0,s-1))} className="h-12 rounded-full border bg-white disabled:opacity-30">Prev</button>
-                <button onClick={()=>{if(cookStep<result.steps.length-1){const n=cookStep+1; setCookStep(n); speak(result.steps[n])} else {speak('Done! You did it.'); setResult(null); setCookMode(false)}}} className="h-12 rounded-full bg-[#1A1A1A] text-white font-bold">{cookStep===result.steps.length-1?'Done ✓':'Next →'}</button>
+                <button onClick={()=>{if(cookStep<result.steps.length-1){const n=cookStep+1; setCookStep(n); speak(result.steps[n])} else {speak('Done!'); setResult(null); setCookMode(false)}}} className="h-12 rounded-full bg-[#1A1A1A] text-white font-bold">{cookStep===result.steps.length-1?'Done ✓':'Next →'}</button>
               </div>
             </div>
           </div>
