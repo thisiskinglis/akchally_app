@@ -1,208 +1,99 @@
 import { useState, useRef, useEffect } from 'react'
 
-const MOCK_RECIPES = (ingredients) => [
-  {
-    id: 'hash',
-    title: 'Rustic Pork Bangers & Potato Hash with Fried Eggs',
-    time: '45 min',
-    vibe: 'Comfort, not in a rush',
-    uses: ['pork bangers','potatoes','onions','eggs','spice'],
-    description: 'Crispy potatoes, sweet onions, seared bangers, topped with runny eggs. Uses your spice for heat.',
+const C = { cream:'#FAF7F1', charcoal:'#1A1A1A', sage:'#7D846E', terracotta:'#C56A4A', orange:'#D97941', stone:'#E8E2D9' }
+
+function sortDinnerOut(transcript, constraints){
+  const lower = transcript.toLowerCase()
+  const urgency = lower.includes('funny') || lower.includes('open') || lower.includes('sad')
+  const effortLabel = ['Bare minimum','Normal','I feel like cooking'][constraints.effort]
+  const cleanup = constraints.pans === 1? 'low' : constraints.pans === 2? 'medium' : 'higher'
+  const main = {
+    id: 'main', title: lower.includes('chicken')? 'Chicken, butternut & feta — one pan, barely any chopping' : 'Tomato, spinach & feta — 20 minute pan',
+    headline: `You’ve got ${lower.includes('chicken')? 'chicken, butternut' : 'tomatoes, spinach'} and feta. I’d make this. It’ll take ${constraints.time <=20? '18' : '32'} minutes.`,
+    time: { total: constraints.time <=20? 18 : 32, active: constraints.effort===0? 8 : 14 },
+    pans: constraints.pans===99?2:constraints.pans, cleanup, effort: effortLabel,
+    why: urgency? 'Uses the mushrooms first — going funny — and keeps it to one pan.' : 'Least effort, most flavour, one pan. No blender, no tray.',
     steps: [
-      'Dice potatoes into 1.5cm cubes, slice onions, slice bangers into 2cm pieces.',
-      'Heat oil in large pan, fry potatoes 12-15 min until golden. Add onions + spice.',
-      'Add bangers, cook 8 min until browned. Make wells, crack in 2 eggs, cover 3-4 min.',
-      'Warm tomatoes quickly in same pan. Serve with a dollop of yoghurt if you like.'
-    ]
-  },
-  {
-    id: 'flatbread',
-    title: 'Spiced Yoghurt Flatbreads with Tomato-Onion Ragu',
-    time: '60 min',
-    vibe: 'Not in a rush - impressive',
-    uses: ['flour','yoghurt','tomatoes','onions','spice'],
-    description: 'Soft flatbreads from flour + yoghurt, topped with jammy spiced tomato-onion ragu. Serve bangers on side.',
-    steps: [
-      'Mix 1 cup flour, 1/2 cup yoghurt, pinch salt + spice to make dough. Rest 10 min.',
-      'Slow cook onions 15 min, add chopped tomatoes + spice, simmer 20 min to ragu.',
-      'Roll dough thin, dry-fry 2 min each side.',
-      'Fry bangers separately, slice and serve on flatbreads with ragu and yoghurt drizzle.'
-    ]
-  },
-  {
-    id: 'bake',
-    title: 'One-Pan Loaded Potato & Bangers Bake',
-    time: '70 min',
-    vibe: 'Hands-off oven bake',
-    uses: ['potatoes','pork bangers','tomatoes','onions','yoghurt','spice'],
-    description: 'Everything in one dish, creamy yoghurt + tomato sauce, baked until bubbling.',
-    steps: [
-      'Preheat oven to 200°C. Slice potatoes thin, layer in oiled dish with onions.',
-      'Mix chopped tomatoes, yoghurt, spice, salt, pour over potatoes.',
-      'Top with bangers, cover foil 35 min.',
-      'Uncover, bake 20 min more until golden. Rest 5 min, fry eggs to top if you want.'
+      { text:'Get butternut in first — 1.5cm cubes, salt, oil, hot pan. Leave it alone.', timer:10, parallel:'While that gets colour, slice chicken.', canLeave:true },
+      { text:'Add chicken thighs to same pan, 6 min. Don’t wash anything.', timer:6, parallel:null, canLeave:false },
+      { text:'Rice in — same pan juices. 1 cup rice, 1.5 cups water. Lid on.', timer:12, parallel:'Now you can shower — I’ll tell you when to check.', canLeave:true },
+      { text:'Feta in last 2 min, spinach to wilt. Taste.', timer:2, parallel:null, canLeave:false },
     ]
   }
-]
+  return { main, alts:[
+    {tag:'EASIEST', title:'Bare minimum chicken & rice', time:{total:20, active:6}, pans:1, note:'One pan. Almost no chopping.'},
+    {tag:'FASTEST', title:'15-min tomato feta pan', time:{total:15, active:10}, pans:1, note:'Flat out fastest.'},
+    {tag:'NICEST', title:'Oven-roasted chicken, butternut, feta', time:{total:42, active:12}, pans:2, note:'Best version if you’ve got more in you.'},
+  ], parsed:{urgency} }
+}
 
 export default function App(){
-  const [transcript, setTranscript] = useState("I've got 2 eggs, flour, yoghurt, spice, pork bangers, tomatoes, onions and potatoes, tonight I'm not in a rush, what can I make?")
-  const [isListening, setIsListening] = useState(false)
-  const [isStandby, setIsStandby] = useState(false)
-  const [recipes, setRecipes] = useState([])
-  const [selected, setSelected] = useState(null)
-  const [stepIdx, setStepIdx] = useState(0)
-  const [standbyQ, setStandbyQ] = useState("")
-  const recognitionRef = useRef(null)
-
-  const speak = (text) => {
-    if(!('speechSynthesis' in window)) return
-    window.speechSynthesis.cancel()
-    const u = new SpeechSynthesisUtterance(text)
-    u.rate = 0.95
-    u.pitch = 1.05
-    window.speechSynthesis.speak(u)
+  const [transcript,setTranscript]=useState("I've got two sad tomatoes, half an onion, chicken thighs, yoghurt and spinach. The mushrooms are going funny.")
+  const [isListening,setIsListening]=useState(false)
+  const [constraints,setConstraints]=useState({effort:1,time:30,pans:1,shopping:'nothing',equipment:['oven','pan']})
+  const [sorted,setSorted]=useState(null)
+  const [selected,setSelected]=useState(null)
+  const [stepIdx,setStepIdx]=useState(0)
+  const [isStandby,setIsStandby]=useState(false)
+  const [standbyText,setStandbyText]=useState('')
+  const [helpOpen,setHelpOpen]=useState(false)
+  const [helpQ,setHelpQ]=useState('')
+  const [tasteFeedback,setTasteFeedback]=useState('')
+  const recRef=useRef(null)
+  const speak=(t)=>{ if(!('speechSynthesis' in window)) return; window.speechSynthesis.cancel(); const u=new SpeechSynthesisUtterance(t); u.rate=0.96; window.speechSynthesis.speak(u); }
+  const startListening=(mode='main')=>{
+    const SR=window.SpeechRecognition||window.webkitSpeechRecognition; if(!SR) return; const rec=new SR(); rec.lang='en-ZA'; rec.continuous=mode!=='main'; rec.interimResults=true;
+    rec.onstart=()=>mode==='main'&&setIsListening(true); rec.onend=()=>{ if(mode==='main') setIsListening(false); if((mode==='standby'||mode==='help')&&(isStandby||helpOpen)){ try{rec.start()}catch{} } }
+    rec.onresult=(e)=>{ const text=Array.from(e.results).map(r=>r[0].transcript).join(''); if(mode==='main') setTranscript(text); if(mode==='standby'){ setStandbyText(text); if(e.results[0].isFinal){ const l=text.toLowerCase(); let a=l.includes('next')?`Next: ${selected?.steps[stepIdx+1]?.text||'Done'}`:l.includes('leave')||l.includes('shower')?selected?.steps[stepIdx]?.canLeave?`Yes — leave it ${selected.steps[stepIdx].timer} min`:'Stay close ~2 min':'Got it'; setStandbyText(a); speak(a);} } if(mode==='help'){ setHelpQ(text); if(e.results[0].isFinal){ let a=''; if(text.toLowerCase().includes('salty')) a='Too salty? Lemon/vinegar, not water. Potato trick 5 min.'; else if(text.toLowerCase().includes('split')) a='Split — off heat, whisk cold yoghurt slowly.'; else if(text.toLowerCase().includes('bland')||text.toLowerCase().includes('flat')) a='Flat? 1/2 tsp vinegar/lemon before salt. Taste again — better?'; else a=`Ok — ${text}. Tell me what you see/smell/taste.`; setTasteFeedback(a); speak(a);} } }
+    recRef.current=rec; rec.start();
   }
-
-  const startListening = (mode='main') => {
-    const SR = window.SpeechRecognition || window.webkitSpeechRecognition
-    if(!SR){ alert('Web Speech not supported - use Chrome Android'); return }
-    const rec = new SR()
-    rec.lang = 'en-ZA'
-    rec.continuous = mode==='standby'
-    rec.interimResults = true
-    rec.onstart = () => mode==='standby' ? null : setIsListening(true)
-    rec.onend = () => {
-      if(mode!=='standby') setIsListening(false)
-      if(mode==='standby' && isStandby){ try{ rec.start() }catch{} }
-    }
-    rec.onresult = (e) => {
-      const text = Array.from(e.results).map(r=>r[0].transcript).join('')
-      if(mode==='standby'){
-        setStandbyQ(text)
-        if(e.results[0].isFinal){
-          handleStandbyQuestion(text)
-        }
-      } else {
-        setTranscript(text)
-      }
-    }
-    recognitionRef.current = rec
-    rec.start()
-  }
-
-  const handleAsk = async () => {
-    // Call your AI backend here: POST /api/recipe
-    // For demo, use mock
-    setRecipes(MOCK_RECIPES(transcript))
-    speak(`I found 3 ideas with what you've got. First up, Rustic Pork Bangers and Potato Hash. Want to cook it?`)
-  }
-
-  const handleStandbyQuestion = async (q) => {
-    if(!q.toLowerCase().trim()) return
-    let answer = "I'm here! "
-    if(q.includes('next')) answer += `Next is: ${selected?.steps[stepIdx+1] || 'That was the last step, you are done!' }`
-    else if(q.includes('long') || q.includes('time')) answer += `This step takes about 8 to 12 minutes. You said you're not in a rush, so take your time.`
-    else if(q.includes('substitute') || q.includes('yoghurt')) answer += `You can skip yoghurt or use a splash of milk. It just adds creaminess.`
-    else answer += `Got it. For ${q}, keep going as described. Need me to repeat the step?`
-    setStandbyQ(answer)
-    speak(answer)
-  }
-
-  useEffect(()=>{
-    if(isStandby && selected){ startListening('standby') }
-    else { recognitionRef.current?.stop() }
-  },[isStandby, selected])
+  const handleSort=()=>{ const r=sortDinnerOut(transcript,constraints); setSorted(r); speak(`${r.main.headline} ${r.main.why}`); }
+  useEffect(()=>{ if(isStandby&&selected) startListening('standby'); },[isStandby,selected])
+  useEffect(()=>{ if(helpOpen) startListening('help'); },[helpOpen])
 
   return (
-    <div className="min-h-screen max-w-[480px] mx-auto bg-[#FFFBF2] text-zinc-800 flex flex-col">
-      <header className="p-5 flex justify-between items-center">
-        <div className="font-black text-[22px] tracking-tight">akchally<span className="text-[#D97941]">.com</span></div>
-        <div className="text-[11px] bg-black text-white px-2.5 py-1 rounded-full">PWA • VOICE ACTIVE</div>
-      </header>
-
-      {!selected ? (
-        <main className="p-5 space-y-5">
-          <div className="bg-white rounded-[28px] p-6 shadow-[0_8px_30px_rgba(0,0,0,0.06)] border border-zinc-100">
-            <h1 className="text-[28px] font-bold leading-[1.05]">Talk to your kitchen.</h1>
-            <p className="text-zinc-500 mt-2 text-[15px]">Tap mic, say what you have. Akchally will speak back and stay on standby.</p>
-
-            <div className="mt-6 flex flex-col items-center">
-              <button onClick={()=> isListening ? recognitionRef.current?.stop() : startListening('main')}
-                className={`w-24 h-24 rounded-full flex items-center justify-center text-3xl transition-all ${isListening ? 'bg-[#D97941] pulse text-white shadow-[0_0_0_12px_rgba(217,121,65,0.2)]' : 'bg-zinc-900 text-white'}`}>
-                {isListening ? '●' : '🎙️'}
-              </button>
-              <p className="text-[12px] mt-3 text-zinc-400">{isListening ? 'Listening... Susan style' : 'Tap to speak'}</p>
-            </div>
-
-            <textarea value={transcript} onChange={e=>setTranscript(e.target.value)}
-              className="w-full mt-6 p-4 bg-[#FFFBF2] rounded-2xl border border-zinc-200 text-[15px] min-h-[90px] outline-none focus:border-[#D97941]"
-              placeholder="I've got 2 eggs, flour..."
-            />
-
-            <div className="flex gap-2 mt-3 flex-wrap">
-              {['Not in a rush','Quick 20 min','High protein'].map(t=>(
-                <span key={t} className="text-[12px] px-3 py-1.5 rounded-full bg-zinc-100 border">{t}</span>
-              ))}
-            </div>
-
-            <button onClick={handleAsk} className="w-full mt-5 bg-[#D97941] text-white py-4 rounded-2xl font-semibold text-[16px]">What can I make? →</button>
-          </div>
-
-          {recipes.length>0 && (
-            <div className="space-y-3">
-              <h2 className="font-bold text-[18px] px-1">Akchally found this for you</h2>
-              {recipes.map(r=>(
-                <div key={r.id} className="bg-white rounded-[22px] p-5 border border-zinc-100 shadow-sm">
-                  <div className="flex justify-between">
-                    <h3 className="font-bold text-[16px] leading-tight w-3/4">{r.title}</h3>
-                    <span className="text-[11px] h-fit bg-[#FFFBF2] border px-2 py-1 rounded-full">{r.time}</span>
-                  </div>
-                  <p className="text-[13px] text-zinc-500 mt-2">{r.description}</p>
-                  <div className="flex gap-1.5 mt-3 flex-wrap">
-                    {r.uses.map(u=><span key={u} className="text-[11px] bg-zinc-900 text-white px-2 py-1 rounded-full">{u}</span>)}
-                  </div>
-                  <button onClick={()=>{ setSelected(r); setStepIdx(0); speak(`Great choice. Let's cook ${r.title}. Step 1: ${r.steps[0]}`)}} className="mt-4 w-full py-3 rounded-xl bg-zinc-900 text-white text-[14px] font-medium">Cook this — voice guide</button>
-                </div>
-              ))}
-            </div>
-          )}
-        </main>
-      ) : (
-        <div className="flex-1 flex flex-col">
-          <div className="p-5">
-            <button onClick={()=>setSelected(null)} className="text-[13px] text-zinc-500">← Back to recipes</button>
-            <h2 className="text-[22px] font-bold leading-tight mt-2">{selected.title}</h2>
-            <div className="mt-3 h-2 bg-zinc-200 rounded-full overflow-hidden">
-              <div className="h-full bg-[#D97941]" style={{width: `${((stepIdx+1)/selected.steps.length)*100}%`}} />
-            </div>
-          </div>
-
-          <div className="flex-1 p-5">
-            <div className="bg-white rounded-[24px] p-6 border shadow-sm min-h-[220px]">
-              <div className="text-[11px] tracking-widest text-zinc-400">STEP {stepIdx+1} / {selected.steps.length}</div>
-              <p className="text-[20px] font-medium leading-snug mt-3">{selected.steps[stepIdx]}</p>
-              <div className="flex gap-2 mt-6">
-                <button onClick={()=>speak(selected.steps[stepIdx])} className="px-4 py-2.5 bg-[#FFFBF2] border rounded-full text-[13px]">🔊 Speak step</button>
-                <button onClick={()=>{ if(stepIdx>0) setStepIdx(s=>s-1)}} className="px-4 py-2.5 bg-zinc-100 rounded-full text-[13px]">Prev</button>
-                <button onClick={()=>{ if(stepIdx<selected.steps.length-1){ setStepIdx(s=>s+1); speak(selected.steps[stepIdx+1]) } }} className="flex-1 py-2.5 bg-zinc-900 text-white rounded-full text-[13px]">Next →</button>
+    <div className="min-h-screen w-full bg-[#FAF7F1] text-[#1A1A1A] flex justify-center">
+      <div className="w-full max-w- flex flex-col min-h-screen">
+        <header className="px-5 pt-6 pb-4 flex justify-between items-center">
+          <div className="flex items-center gap-3"><img src="/akchally_mark_transparent.png" className="w-9 h-9" alt=""/><div><div className="font-bold text- leading-none">akchally</div><div className="text- text-[#7D846E] font-medium">gets dinner handled</div></div></div>
+          <div className="text- px-2.5 py-1 rounded-full bg-black text-white">PWA • SORT DINNER MODE</div>
+        </header>
+        {!selected? (
+          <main className="px-5 pb-10 space-y-5">
+            <div className="bg-white rounded- p-6 border border-[#E8E2D9] shadow-[0_10px_40px_rgba(0,0,0,0.04)]">
+              <h1 className="text- font-bold leading-[0.95] tracking-tight">What have you got?</h1>
+              <p className="text- text-[#7D846E] mt-2">Speak like a human. Sad tomatoes, half an onion, “going funny” — I get it.</p>
+              <div className="mt-5 flex flex-col items-center">
+                <button onClick={()=>isListening?recRef.current?.stop():startListening('main')} className={`w- h- rounded-full flex items-center justify-center text- ${isListening?'bg-[#C56A4A] text-white animate-pulse':'bg-black text-white'}`}>{isListening?'●':'🎙️'}</button>
               </div>
-            </div>
-
-            <div className="mt-5 bg-zinc-900 text-white rounded-[24px] p-5">
-              <div className="flex justify-between items-center">
-                <div className="font-semibold text-[14px]">Standby Chef {isStandby ? '● ON' : '○ OFF'}</div>
-                <button onClick={()=>setIsStandby(!isStandby)} className={`px-3 py-1.5 rounded-full text-[12px] ${isStandby ? 'bg-[#D97941]' : 'bg-white text-black'}`}>{isStandby ? 'Stop listening' : 'Start listening'}</button>
+              <textarea value={transcript} onChange={e=>setTranscript(e.target.value)} className="w-full mt-6 p-4 bg-[#FAF7F1] rounded-2xl border border-[#E8E2D9] text- min-h- outline-none focus:border-[#7D846E]" />
+              {transcript.toLowerCase().includes('funny')&&<div className="mt-3 text- px-3 py-2 rounded-full bg-[#C56A4A]/10 border border-[#C56A4A]/20 text-[#C56A4A]">⚠️ Using up first: mushrooms going funny</div>}
+              <div className="mt-6"><div className="flex justify-between"><span className="text- tracking-widest text-[#7D846E] font-semibold">HOW MUCH EFFORT HAVE YOU GOT?</span><span className="text- px-2 py-1 rounded-full bg-[#FAF7F1] border">{['Bare minimum','Normal','Feel like cooking'][constraints.effort]}</span></div>
+                <div className="mt-3 grid grid-cols-3 gap-2">{[{k:0,l:'Bare minimum',d:'1 pan, 8 min'},{k:1,l:'Normal',d:'Balanced'},{k:2,l:'Feel like cooking',d:'Nicer result'}].map(o=><button key={o.k} onClick={()=>setConstraints({...constraints,effort:o.k})} className={`text-left rounded-2xl p-3 border ${constraints.effort===o.k?'bg-black text-white border-black':'bg-[#FAF7F1] border-[#E8E2D9]'}`}><div className="text- font-semibold">{o.l}</div><div className="text- mt-1 opacity-70">{o.d}</div></button>)}</div>
               </div>
-              <p className="text-[12px] text-zinc-400 mt-2">When ON, just say “hey akchally, what’s next?” — I’ll stay listening while you cook.</p>
-              {standbyQ && <div className="mt-4 p-3 bg-white/10 rounded-xl text-[13px]">{standbyQ}</div>}
-              {isStandby && <div className="mt-3 text-[11px] text-[#D97941] animate-pulse">● Listening for questions...</div>}
+              <div className="mt-6 space-y-4">
+                <div><div className="text- tracking-widest text-[#7D846E] font-semibold mb-2">TIME • HARD LIMIT</div><div className="flex gap-2 flex-wrap">{[15,20,30,45,60].map(t=><button key={t} onClick={()=>setConstraints({...constraints,time:t})} className={`px-3.5 py-2 rounded-full text- border ${constraints.time===t?'bg-[#7D846E] text-white border-[#7D846E]':'bg-white border-[#E8E2D9]'}`}>{t===60?'60+':`${t} min`}</button>)}</div></div>
+                <div><div className="text- tracking-widest text-[#7D846E] font-semibold mb-2">CLEANUP COST</div><div className="flex gap-2">{[{v:1,l:'One pan only'},{v:2,l:'Two pans max'},{v:99,l:'Whatever'}].map(o=><button key={o.v} onClick={()=>setConstraints({...constraints,pans:o.v})} className={`px-3.5 py-2 rounded-full text- border ${constraints.pans===o.v?'bg-black text-white border-black':'bg-white border-[#E8E2D9]'}`}>{o.l}</button>)}</div></div>
+              </div>
+              <button onClick={handleSort} className="w-full mt-7 bg-black text-white py-4 rounded-2xl font-semibold">Sort dinner out →</button>
+            </div>
+            {sorted&&<div className="space-y-4">
+              <div className="bg-black text-[#FAF7F1] rounded- p-6"><div className="text- tracking-widest text-[#7D846E]">AKCHALLY SAYS</div><h2 className="text- font-bold leading-[1.05] mt-2">{sorted.main.headline}</h2><p className="text- text-white/70 mt-3">{sorted.main.why}</p><div className="flex gap-2 mt-4 flex-wrap"><span className="text- px-2.5 py-1 rounded-full bg-white/10 border-white/10">{sorted.main.time.total} min total • {sorted.main.time.active} min from you</span><span className="text- px-2.5 py-1 rounded-full bg-white/10">{sorted.main.pans} pan • cleanup {sorted.main.cleanup}</span></div><button onClick={()=>{setSelected(sorted.main); setStepIdx(0); speak(sorted.main.steps[0].text)}} className="mt-5 w-full py-3.5 rounded-full bg-[#FAF7F1] text-black font-semibold">Cook this — hands-free →</button></div>
+              <div className="grid grid-cols-3 gap-2">{sorted.alts.map(a=><div key={a.tag} className="bg-white rounded-2xl p-3 border border-[#E8E2D9]"><div className="text- tracking-widest text-[#C56A4A] font-bold">{a.tag}</div><div className="text- font-semibold mt-1 leading-tight">{a.title}</div><div className="text- text-[#7D846E] mt-1">{a.time.total} min</div></div>)}</div>
+            </div>}
+          </main>
+        ):(
+          <div className="flex-1 flex flex-col">
+            <div className="px-5 pt-2 pb-4"><button onClick={()=>setSelected(null)} className="text- text-[#7D846E]">← Back</button><h2 className="text- font-bold mt-2">{selected.title}</h2><div className="mt-3 h-1.5 bg-[#E8E2D9] rounded-full overflow-hidden"><div className="h-full bg-black" style={{width:`${((stepIdx+1)/selected.steps.length)*100}%`}} /></div></div>
+            <div className="flex-1 px-5 space-y-4 pb-10">
+              <div className="bg-white rounded- p-6 border border-[#E8E2D9]"><div className="text- tracking-widest text-[#A8A29A]">STEP {stepIdx+1} / {selected.steps.length}</div><p className="text- font-medium mt-3 leading-snug">{selected.steps[stepIdx].text}</p>{selected.steps[stepIdx].parallel&&<div className="mt-3 p-3 rounded-xl bg-[#FAF7F1] border text-">↳ While that cooks: {selected.steps[stepIdx].parallel}</div>}<div className="flex gap-2 mt-5"><button onClick={()=>speak(selected.steps[stepIdx].text)} className="px-4 py-2.5 bg-[#FAF7F1] border rounded-full">🔊</button><button onClick={()=>setStepIdx(s=>Math.max(0,s-1))} className="px-4 py-2.5 bg-[#E8E2D9] rounded-full">Prev</button><button onClick={()=>{if(stepIdx<selected.steps.length-1){setStepIdx(s=>s+1); speak(selected.steps[stepIdx+1].text)}}} className="flex-1 py-2.5 bg-black text-white rounded-full">Next →</button></div></div>
+              <div className="bg-[#7D846E] text-white rounded- p-5"><div className="flex justify-between"><div className="font-semibold text-">Intelligent timers</div><div className="text- px-2 py-1 rounded-full bg-white/20">{selected.steps[stepIdx].timer} min</div></div><button onClick={()=>{const msg=selected.steps[stepIdx].canLeave?`Yes — leave it ${selected.steps[stepIdx].timer} min`:'Stay close ~2 min'; setStandbyText(msg); speak(msg);}} className="mt-3 w-full py-2.5 rounded-full bg-[#FAF7F1] text-black text- font-medium">Can I leave this alone?</button>{standbyText&&<div className="mt-3 p-3 bg-black/20 rounded-xl text-">{standbyText}</div>}</div>
+              <div className="bg-black text-white rounded- p-5"><div className="flex justify-between"><div className="font-semibold text-">Standby Chef {isStandby?'● ON':'○ OFF'}</div><button onClick={()=>setIsStandby(!isStandby)} className={`px-3 py-1.5 rounded-full text- ${isStandby?'bg-[#C56A4A]':'bg-white text-black'}`}>{isStandby?'Stop':'Start'}</button></div></div>
+              <div className="bg-white rounded- p-5 border border-[#C56A4A]/30"><div className="flex justify-between"><div className="font-bold text-">Rescue — HELP</div><button onClick={()=>setHelpOpen(!helpOpen)} className={`px-3 py-1.5 rounded-full text- ${helpOpen?'bg-[#C56A4A] text-white':'bg-[#C56A4A]/10 text-[#C56A4A] border'}`}>{helpOpen?'Listening...':'HELP'}</button></div><input value={helpQ} onChange={e=>setHelpQ(e.target.value)} placeholder="Too salty / split / bland..." className="w-full mt-3 p-3 bg-[#FAF7F1] rounded-xl border text-" /><button onClick={()=>{let a=''; const l=helpQ.toLowerCase(); if(l.includes('salty')) a='Too salty? Lemon/vinegar.'; else if(l.includes('bland')||l.includes('flat')) a='Flat? 1/2 tsp vinegar/lemon before salt.'; else a=`Ok — ${helpQ}. I fix without restart.`; setTasteFeedback(a); speak(a);}} className="mt-2 w-full py-2.5 rounded-full bg-[#C56A4A] text-white">Fix it</button>{tasteFeedback&&<div className="mt-4 p-4 rounded-xl bg-[#FAF7F1] border"><div className="text-">{tasteFeedback}</div></div>}</div>
             </div>
           </div>
-        </div>
-      )}
-
-      <footer className="p-5 text-center text-[11px] text-zinc-400">akchally.com • PWA ready • Installable on Android • Add to Home Screen</footer>
+        )}
+      </div>
     </div>
   )
 }
