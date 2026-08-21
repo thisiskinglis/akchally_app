@@ -194,7 +194,7 @@ export default function App(){
             <h1 className="text-[32px] font-bold leading-[0.95] tracking-tight">What are we<br/>making?</h1>
             <p className="mt-3 text-[15px] leading-[1.4] text-[#7D846E]">Tell me what you've got.<br/>I'll sort the rest.</p>
             <div className="mt-8 relative">
-              <textarea value={have} onChange={e=>setHave(e.target.value)} placeholder="eggs, butter, garlic, pasta, spinach that's about to die" className={`w-full min-h-[112px] p-5 pr-12 rounded-[20px] bg-[#EDE8DF] border text-[16px] leading-[1.4] outline-none transition-all ${listening?'border-[#C56A4A] bg-white shadow-[0_0_0_3px_rgba(197,106,74,0.15)]':'border-black/[0.06]'}`} />
+              <textarea value={have} onChange={e=>setHave(e.target.value)} placeholder="Two sad tomatoes, mushrooms starting to turn, cream that's been open a few days, potatoes, and some leftover chicken." className={`w-full min-h-[112px] p-5 pr-12 rounded-[20px] bg-[#EDE8DF] border text-[16px] leading-[1.4] outline-none transition-all ${listening?'border-[#C56A4A] bg-white shadow-[0_0_0_3px_rgba(197,106,74,0.15)]':'border-black/[0.06]'}`} />
               <button onClick={startVoice} className={`absolute bottom-3 right-3 w-10 h-10 rounded-full flex items-center justify-center transition-all ${listening?'bg-[#C56A4A] text-white animate-pulse scale-110':'bg-white border border-black/10'}`}>{listening?'●':'🎙'}</button>
             </div>
             <div className={`mt-3 flex items-center gap-2 text-[12px] font-medium ${listening?'text-[#C56A4A]':'text-[#7D846E]'}`}>
