@@ -40,31 +40,54 @@ export default function App(){
     else setShowInstallHelp(true)
   }
 
-    const startVoice = ()=>{
-    const SR = window.SpeechRecognition || window.webkitSpeechRecognition
-    if(!SR) return alert('Voice needs Chrome on Android — use Chrome, not Samsung Internet')
-    if(listening && recRef.current){ recRef.current.stop(); setListening(false); return }
-
-    const rec = new SR()
-    rec.lang='en-ZA'
-    rec.interimResults = true // <-- this makes writing appear as you speak
-    rec.continuous = false
-    rec.maxAlternatives = 1
-
-    rec.onstart=()=>{ setListening(true); setHave('') }
-    rec.onend=()=> setListening(false)
-    rec.onerror=(e)=>{ console.log(e); setListening(false) }
-
-    rec.onresult=(e)=>{
-      let text = ''
-      for(let i=0; i<e.results.length; i++){
-        text += e.results[i][0].transcript + ' '
-      }
-      setHave(text.trim()) // writes live into the box
+      const startVoice = async ()=>{
+    try{
+      // Force mic permission first
+      await navigator.mediaDevices.getUserMedia({audio:true})
+    }catch(e){
+      alert('Mic blocked — go to Chrome → 🔒 → Permissions → Microphone → Allow akchally.com')
+      return
     }
 
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition
+    if(!SR){
+      alert('This browser does not support voice — you are in Samsung Internet / Firefox. Open akchally.com in CHROME')
+      return
+    }
+
+    if(listening){
+      recRef.current?.stop()
+      setListening(false)
+      return
+    }
+
+    const rec = new SR()
+    rec.lang = 'en-US' // en-ZA is flaky on some phones, use en-US
+    rec.interimResults = true
+    rec.continuous = false
+
+    rec.onstart = ()=>{
+      setListening(true)
+      setHave('Listening... say what you got')
+      console.log('STARTED LISTENING')
+    }
+    rec.onresult = (e)=>{
+      let txt = ''
+      for(let i=0;i<e.results.length;i++) txt += e.results[i][0].transcript + ' '
+      setHave(txt.trim())
+    }
+    rec.onerror = (e)=>{
+      console.log('SPEECH ERROR', e.error)
+      alert('Voice error: ' + e.error + ' — try Chrome, not the installed app for now')
+      setListening(false)
+    }
+    rec.onend = ()=>{
+      setListening(false)
+      if(have.startsWith('Listening')) setHave('')
+    }
+
+    recRef.current = rec
     rec.start()
-    recRef.current=rec
   }
 
   const sortDinner = ()=>{
@@ -126,10 +149,20 @@ export default function App(){
 
             {/* Input - no outer box, oatmeal field, mic inside */}
             <div className="mt-8 relative">
+                          <div className="mt-8 relative">
               <textarea
-  value={have}
-  onChange={e=>setHave(e.target.value)}
-  placeholder="..."
+                value={have}
+                onChange={e=>setHave(e.target.value)}
+                className={`w-full min-h- p-5 pr-12 rounded- bg-[#EDE8DF] border text- leading-[1.4] outline-none transition-all ${listening?'border-[#C56A4A] bg-white shadow-[0_0_0_3px_rgba(197,106,74,0.15)]':'border-black/[0.06]'}`}
+              />
+              <button onClick={startVoice} className={`absolute bottom-3 right-3 w-10 h-10 rounded-full flex items-center justify-center transition-all ${listening?'bg-[#C56A4A] text-white animate-pulse scale-110':'bg-white border border-black/10'}`}>
+                {listening?'●':'🎙'}
+              </button>
+            </div>
+            <div className={`mt-3 flex items-center gap-2 text- font-medium ${listening?'text-[#C56A4A]':'text-[#7D846E]'}`}>
+              <span className={`w-5 h-5 rounded-full border flex items-center justify-center ${listening?'bg-[#C56A4A] text-white animate-ping':''}`}>{listening?'●':'🎙'}</span>
+              {listening?'Listening... speak now':'or just tell me — tap mic'}
+            </div>"
 />
               <button onClick={startVoice} className={`absolute bottom-3 right-3 w-9 h-9 rounded-full flex items-center justify-center transition-all ${listening?'bg-[#C56A4A] text-white animate-pulse':'bg-white border border-black/10'}`}>
                 {listening?'●':'🎙'}
