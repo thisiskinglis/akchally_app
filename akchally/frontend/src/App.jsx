@@ -14,7 +14,7 @@ export default function App(){
   const [deferredPrompt, setDeferredPrompt] = useState(null)
   const [showInstallHelp, setShowInstallHelp] = useState(false)
   const [platform, setPlatform] = useState('android')
-  const [have, setHave] = useState("eggs, butter, garlic, pasta, spinach that's about to die")
+  const [have, setHave] = useState("Two sad tomatoes, mushrooms starting to turn, cream that's been open a few days, potatoes, and some leftover chicken.")
   const [effort, setEffort] = useState(0)
   const [listening, setListening] = useState(false)
   const [thinking, setThinking] = useState(false)
