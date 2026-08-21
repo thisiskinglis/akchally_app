@@ -7,17 +7,19 @@ export default defineConfig({
     react(),
     VitePWA({
       registerType: 'autoUpdate',
+      includeAssets: ['favicon-32.png', 'apple-touch-icon.png'],
       manifest: {
         name: 'Akchally',
         short_name: 'Akchally',
-        description: 'Voice-active cooking - what can I make with what I have?',
-        theme_color: '#D97941',
-        background_color: '#FFFBF2',
+        description: 'turn what you have into something good',
+        theme_color: '#FAF7F1',
+        background_color: '#FAF7F1',
         display: 'standalone',
         start_url: '/',
         icons: [
           { src: '/icon-192.png', sizes: '192x192', type: 'image/png' },
-          { src: '/icon-512.png', sizes: '512x512', type: 'image/png' }
+          { src: '/icon-512.png', sizes: '512x512', type: 'image/png' },
+          { src: '/icon-512-maskable-pad.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' }
         ]
       }
     })
